@@ -7,7 +7,7 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT
+    name TEXT UNIQUE
 )
 """)
 
@@ -15,9 +15,20 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS chats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER,
+    chat_id INTEGER,
     prompt TEXT,
     response TEXT,
     model TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER,
+    key TEXT,
+    value TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 """)
