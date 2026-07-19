@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from services.logging_config import configure_logging, get_logger
-from services.ollama_service import generate_response
+from services.reasoning_service import generate
 from services.routing import route
 from storage.project_store import (
     create_project,
@@ -22,6 +22,7 @@ from storage.project_store import (
 )
 from services.plugin_manager import execute_plugin
 from services.memory_extraction import extract_memory_facts
+from storage.experience_store import log_experience
 
 configure_logging()
 logger = get_logger("aether.main")
@@ -147,10 +148,32 @@ def chat(request: ChatRequest):
         memory = get_memory(project_id)
 
     # -------- Generate Response --------
+    start = time.monotonic()
     if decision.tool:
         response = execute_plugin(decision.tool, prompt)
     else:
-        response = generate_response(prompt, model, history, memory)
+        response = generate(prompt, model, history, memory)
+    latency_ms = round((time.monotonic() - start) * 1000, 1)
+
+    # -------- Experience Log (see ARCHITECTURE.md's Experience Service) --------
+    import structlog
+    request_id = structlog.contextvars.get_contextvars().get("request_id")
+    success = not (response or "").startswith((
+        "Error", "Execution timed out", "Execution blocked",
+        "Access denied", "File not found", "Not a file",
+        "Search failed", "No useful results", "Could not reach Ollama",
+        "Request to", "Request failed",
+    ))
+    log_experience(
+        project_id=project_id,
+        request_id=request_id,
+        prompt=prompt,
+        tool=decision.tool,
+        tool_source=decision.tool_source,
+        model=model,
+        success=success,
+        latency_ms=latency_ms,
+    )
 
     # -------- Memory Extraction (LLM-based, upserted — see memory_extraction.py) --------
     if project_id:

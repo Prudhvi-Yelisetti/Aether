@@ -27,15 +27,17 @@ Makes the codebase coherent before it grows further.
 
 See `STATUS.md` for verification details on each item.
 
-## Phase C — Tool Service Formalization (~1–2 months)
+## Phase C — Tool Service Formalization (~1–2 months)  ✅ COMPLETE
 
 The first genuinely new AIOS-aligned capability, and the highest-leverage next investment because a real precursor already exists (`plugin_manager.py`).
 
-- [ ] C1. Define a Tool contract: `name`, `description`, `input_schema`, `output_schema`, `execute()`
-- [ ] C2. Refactor `code_runner`, `file_reader`, `web_search` to implement the contract
-- [ ] C3. Build a `ToolRegistry` — register tools, query by capability, add new tools without touching routing logic
-- [ ] C4. Route all LLM calls through one Reasoning Service entry point (wrap `ollama_service`) so a second model provider can be added later without touching every caller
-- [ ] C5. Add an `ExperienceLog` — every execution writes `{prompt, tool, result, model, latency, timestamp}` to its own table
+- [x] C1. Define a Tool contract: `name`, `description`, `input_schema`, `output_schema`, `execute()` — done via `services/tools/base.py`; input schemas are real JSON Schema via pydantic
+- [x] C2. Refactor `code_runner`, `file_reader`, `web_search` to implement the contract — done; per ARCHITECTURE.md's "Tools never perform reasoning," natural-language parsing moved out of the plugins and into `plugin_manager.py`, leaving the plugins purely deterministic
+- [x] C3. Build a `ToolRegistry` — done via `services/tools/registry.py`; `plugin_manager.py` now dispatches through `registry.get(name)` instead of an if/elif chain
+- [x] C4. Route all LLM calls through one Reasoning Service entry point — done via `services/reasoning_service.py`; it's now the only module importing `ollama_service` directly
+- [x] C5. Add an `ExperienceLog` — done via the `experiences` table (Alembic `3d051fbf7d64`) + `storage/experience_store.py`; verified live with a matching `request_id` across structured logs and the DB row
+
+See `STATUS.md` for verification details on each item.
 
 ## Phase D — Skill & Step Abstraction
 

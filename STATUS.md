@@ -1,18 +1,17 @@
 # Aether — Current Status
 
-_Last updated: July 19, 2026, after completing Phase A and Phase B. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 19, 2026, after completing Phase A, B, and C. Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 ## Snapshot
 
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + Phase B complete.** Security/correctness fixed, routing unified, memory upserts, migrations tracked. |
-| Commits | Phase A committed and pushed (`e4720c2`). Phase B changes below not yet committed. |
-| Local usage | 1 project, 3 memory rows, 25 chats — all verified intact through both phases' migrations |
+| Current state | **Phase A + B + C complete.** Security fixed, routing unified, memory upserts, formal Tool contract + registry, single Reasoning Service entry point, Experience log. |
+| Commits | Phase A (`e4720c2`) and Phase B (`57f3dd1`) committed and pushed. Phase C changes below not yet committed. |
+| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration across all 3 phases |
 | Critical blockers | 0 |
-| Important issues open | 0 (all 5 from Phase A/B resolved) |
-| Next phase | `ROADMAP.md` → Phase C (Tool Service formalization) |
+| Next phase | `ROADMAP.md` → Phase D (Skill/Step abstraction) |
 
 ## How to run it now
 
@@ -20,47 +19,36 @@ _Last updated: July 19, 2026, after completing Phase A and Phase B. Update this 
 cd backend
 .venv/bin/uvicorn main:app --reload --port 8000
 ```
+Apply new migrations after pulling: `.venv/bin/alembic upgrade head`.
 
-New dependencies live in `backend/.venv` (SQLAlchemy, Alembic, structlog), not system Python. Recreate with:
-```bash
-python3 -m venv .venv
-.venv/bin/pip install fastapi uvicorn pydantic requests sqlalchemy alembic structlog
-```
+## Resolved — Phase A (Security & Correctness) — committed `e4720c2`
 
-Code execution requires `bwrap` (present on this machine). File-reading is scoped to `~/aether-workspace/`.
+Pooled SQLAlchemy engine, safe math eval (no `eval()`), `bwrap`-sandboxed code execution, allowlisted file reads, Alembic migrations, `structlog` + request IDs. See prior status entries for verification details (preserved in git history of this file).
 
-To apply new migrations after pulling changes: `.venv/bin/alembic upgrade head`.
+## Resolved — Phase B (Architecture Cleanup) — committed `57f3dd1`
 
-## Resolved — Phase A (Security & Correctness) — committed as `e4720c2`
+Unified routing (`services/routing.py`), LLM-based memory extraction, memory upserts via unique constraint + `ON CONFLICT`, frontend duplicate-call fix.
 
-1. ✅ Global SQLite singleton → pooled SQLAlchemy engine
-2. ✅ `eval()` → AST-based safe math evaluator
-3. ✅ Bypassable sandbox → `bwrap` isolation (no network, read-only fs, resource limits)
-4. ✅ Arbitrary file read → allowlisted `~/aether-workspace/`
-5. ✅ No migrations → Alembic, stamped at baseline, zero data loss
-6. ✅ Silent failures → `structlog` + request-ID middleware
+## Resolved — Phase C (Tool Service Formalization) — not yet committed
 
-## Resolved — Phase B (Architecture Cleanup) — not yet committed
+1. ✅ **Tool contract** — `services/tools/base.py` defines `Tool` (name, description, `InputModel`, `execute()`) and `ToolResult`. Input schemas are real JSON Schema via pydantic's `model_json_schema()` — verified `registry.describe_all()` produces a schema a future Planning Service could consume directly.
+2. ✅ **Tools refactored to be deterministic-only** — per `ARCHITECTURE.md`'s "Tools never perform reasoning": `file_reader.read_file()` and `web_search.web_search()` now take already-structured input (a filename, a clean query) instead of parsing natural language themselves. That parsing moved to `plugin_manager.py`, which is where the reasoning steps belong. `CodeTool`, `FileTool`, `WebTool` in `services/tools/` wrap the three plugins.
+3. ✅ **`ToolRegistry`** (`services/tools/registry.py`) — tools are registered once at import time; `plugin_manager.py` now dispatches through `registry.get(name)` instead of an if/elif chain. Adding a 4th tool means writing one class and one `.register()` call.
+4. ✅ **Reasoning Service entry point** — `services/reasoning_service.py` is now the only module that imports `ollama_service` directly. `plugin_manager.py`, `memory_extraction.py`, and `main.py` all call `reasoning_service.generate()`. Adding a second model provider later means changing this one file.
+5. ✅ **Experience log** — new `experiences` table (Alembic `3d051fbf7d64`, purely additive) records `{project_id, request_id, prompt, tool, tool_source, model, success, latency_ms, timestamp}` for every `/chat` call. Verified live: a `9*9` request produced a matching row with the same `request_id` as its structured logs, `tool_source: "rule"`, `success: true`, sub-millisecond latency.
 
-1. ✅ **Routing unified** — new `services/routing.py` replaces the two disconnected systems (`router.py`'s model selection + `plugin_manager.py`'s always-on LLM tool decision). One `route(prompt, mode)` call now returns `{model, tool, tool_source}`. It tries the free rule-based `decide_plugin()` first and only falls back to an LLM call when the rules don't match — verified live: `"search python news"` was routed with `tool_source: "rule"`, meaning zero extra Ollama calls were spent deciding to use the web tool.
-2. ✅ **Memory extraction is now LLM-based** — `services/memory_extraction.py` asks the model for structured `{key: value}` facts instead of string-matching fixed phrases like "i like"/"i prefer". Falls back to `{}` (no facts) on any parse failure rather than raising.
-3. ✅ **Memory upserts** — added a `UniqueConstraint("project_id", "key")` to `Memory` via Alembic migration `f33fab44be66` (SQLite batch-mode table rebuild; existing 3 rows verified intact after). `save_memory()` now uses `INSERT ... ON CONFLICT DO UPDATE`. Verified live: saving `name` twice with different values leaves exactly one row with the latest value, not two.
-4. ✅ **Frontend duplicate call removed** — `fetchProjects()` was called twice in `createProject()` in `App.js`; now called once.
-5. ✅ **Bare `except:` blocks** — none remain; Phase A's `structlog`-based error handling already covered the modules touched here (`ollama_service.py`, `project_store.py`).
+Verified end-to-end: the full deterministic path (rule-routed math → `CodeTool` → `safe_eval_math`) works with zero LLM calls and zero network access, exactly as before the refactor — the Tool contract changes didn't regress any Phase A protections (traversal blocking, sandboxing all re-verified against the new `Tool.execute()` interface).
 
-## Important (Phase C candidates — see ROADMAP.md)
+## Known gap (not introduced by Phase C, just made visible by it)
 
-None outstanding from Phase A/B. Next real gaps are architectural, not bugs:
-- No formal Tool contract (input/output schema) — plugins are still ad hoc functions
-- No model-provider abstraction — `ollama_service.py` is still the only path to an LLM, hardcoded
-- No Experience log — executions aren't recorded anywhere for future learning
+When Ollama is unreachable, `execute_plugin`'s code-gen path (LLM writes code → `CodeTool` runs it) doesn't check whether the LLM call itself failed before feeding the result into the sandbox as "code" — it fails safely (a Python `SyntaxError` inside the sandbox, not a security issue) but isn't a clean error message. Worth a small fix in Phase D.
 
 ## What's already right — keep these
 
-- **`services/routing.py`** is now the single source of truth for "what should handle this request" — this is the natural seam where a future Planning Service will attach.
-- **`project_id` as a first-class entity** — correct precursor to Project Brain.
-- **Upsert-based memory** — correct precursor to a real Memory Service; the (project_id, key) constraint is the right primitive to build typed facts on top of later.
+- **`services/tools/`** — the Tool contract is the correct foundation for Phase D's Skill abstraction (a Skill will be a sequence of Tool calls sharing context).
+- **`services/reasoning_service.py`** — correct single seam for model independence.
+- **`experiences` table** — correct foundation for a real Evolution Service later (Phase F+), once there's enough volume to learn from.
 
 ## Immediate next action
 
-Review and commit the Phase B changes, then start `ROADMAP.md` → Phase C.
+Review and commit the Phase C changes, then start `ROADMAP.md` → Phase D.

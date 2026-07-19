@@ -15,7 +15,7 @@ current instead of accumulating unbounded, potentially contradictory rows.
 import json
 
 from services.logging_config import get_logger
-from services.ollama_service import generate_response
+from services.reasoning_service import generate
 
 logger = get_logger("aether.memory")
 
@@ -39,7 +39,7 @@ def extract_memory_facts(prompt: str) -> dict:
     """Returns {key: value} facts extracted from the prompt, or {} on failure.
     Never raises — a bad LLM response should not break the chat request."""
     try:
-        raw = generate_response(
+        raw = generate(
             EXTRACTION_PROMPT.format(prompt=prompt),
             model="mistral",
         )

@@ -1,7 +1,5 @@
-from plugins.code_runner import run_code
-from plugins.file_reader import read_file
-from plugins.web_search import web_search
-from services.ollama_service import generate_response
+from services.reasoning_service import generate
+from services.tools.registry import registry
 import ast
 import operator
 import re
@@ -54,12 +52,12 @@ def decide_plugin(prompt: str):
         "run code",
         "execute code"
     ]):
-        return "python"
+        return "code"
 
     if any(word in prompt_lower for word in [
         "calculate", "compute", "factorial", "+", "-", "*", "/"
     ]):
-        return "python"
+        return "code"
 
     if any(word in prompt_lower for word in [
         "read", ".txt", ".py", ".md"
@@ -80,13 +78,13 @@ You are an AI decision system.
 Decide whether this user request needs a tool.
 
 Available tools:
-- python → calculations, code execution
+- code → calculations, code execution
 - file → reading files
 - web → internet search
 
 Rules:
 - Return ONLY one word:
-    python
+    code
     file
     web
     none
@@ -94,10 +92,10 @@ Rules:
 Request: {prompt}
 """
 
-    decision = generate_response(decision_prompt, model="mistral").strip().lower()
+    decision = generate(decision_prompt, model="mistral").strip().lower()
 
-    if "python" in decision:
-        return "python"
+    if "code" in decision:
+        return "code"
     if "file" in decision:
         return "file"
     if "web" in decision:
@@ -107,13 +105,20 @@ Request: {prompt}
 
 
 # -------- MAIN EXECUTION FUNCTION --------
-def execute_plugin(plugin_name: str, prompt: str):
+# Dispatches through the ToolRegistry (see services/tools/registry.py). The
+# natural-language -> structured-input translation for each tool happens
+# here (it's a reasoning step), while the Tool itself only does deterministic
+# execution — see the module docstring in services/tools/base.py.
+def execute_plugin(plugin_name: str, prompt: str) -> str:
 
-    # -------- PYTHON TOOL --------
-    if plugin_name == "python":
+    tool = registry.get(plugin_name)
+    if tool is None:
+        return None
 
-        # Fast path: simple math (safe_eval_math never executes arbitrary code,
-        # unlike eval() — it only walks a restricted arithmetic AST)
+    # -------- CODE TOOL --------
+    if plugin_name == "code":
+        # Fast path: simple math (safe_eval_math never executes arbitrary
+        # code, unlike eval() — it only walks a restricted arithmetic AST)
         if is_simple_math(prompt):
             try:
                 result = safe_eval_math(prompt)
@@ -121,7 +126,6 @@ def execute_plugin(plugin_name: str, prompt: str):
             except Exception:
                 pass
 
-        # AI-generated code
         code_prompt = f"""
 You are a Python code generator.
 
@@ -134,41 +138,47 @@ Rules:
 
 Request: {prompt}
 """
-        code = generate_response(code_prompt, model="llama3")
-        return run_code(code)
+        code = generate(code_prompt, model="llama3")
+        result = tool.execute(tool.InputModel(code=code))
+        return result.output
 
     # -------- FILE TOOL --------
     elif plugin_name == "file":
-        content = read_file(prompt)
+        # Extracting a filename out of a natural-language prompt is a
+        # reasoning-adjacent parsing step — it lives here, not in FileTool
+        # or read_file(), which now only handle an already-known filename.
+        candidate = next((p for p in prompt.split() if "." in p), None)
+        if not candidate:
+            return "No file specified"
 
-        summary = generate_response(
-            f"Summarize this file content clearly:\n{content}",
+        result = tool.execute(tool.InputModel(filename=candidate))
+        if not result.success:
+            return result.output
+
+        summary = generate(
+            f"Summarize this file content clearly:\n{result.output}",
             model="mistral"
         )
-
         return summary
 
     # -------- WEB TOOL --------
     elif plugin_name == "web":
-
-        # Step 1: Extract clean query
         query_prompt = f"""
 Extract the main search query from this user request.
 Return ONLY the search query.
 
 Request: {prompt}
 """
-        clean_query = generate_response(query_prompt, model="mistral").strip()
+        clean_query = generate(query_prompt, model="mistral").strip()
 
-        # Step 2: Search
-        results = web_search(clean_query)
+        result = tool.execute(tool.InputModel(query=clean_query))
+        if not result.success:
+            return result.output
 
-        # Step 3: Summarize
-        summary = generate_response(
-            f"Explain this simply:\n{results}",
+        summary = generate(
+            f"Explain this simply:\n{result.output}",
             model="mistral"
         )
-
         return summary
 
     return None
