@@ -39,18 +39,23 @@ The first genuinely new AIOS-aligned capability, and the highest-leverage next i
 
 See `STATUS.md` for verification details on each item.
 
-## Phase D — Skill & Step Abstraction
+## Phase D — Skill & Step Abstraction  ✅ COMPLETE
 
 Only start once Phase C is stable and the Experience log has real data in it.
 
-- [ ] D1. Define a Step: a reusable execution procedure with a contract, script, and validation
-- [ ] D2. Define a Skill: a named sequence of Steps sharing context
-- [ ] D3. Compose the existing 3 tools into at least one real multi-step Skill (proves the abstraction before generalizing it)
+- [x] D1. Define a Step: a reusable execution procedure with a contract, script, and validation — done via `services/steps/base.py`; unlike a Tool, a Step may call the Reasoning Service (documented explicitly as the exception to "tools never reason")
+- [x] D2. Define a Skill: a named sequence of Steps sharing context — done via `services/skills/base.py`; `Skill.run()` stops at the first failed Step rather than continuing with a broken context
+- [x] D3. Compose the existing 3 tools into at least one real multi-step Skill — done via `ResearchTopicSkill` (web search → summarize → save to memory), deliberately not wired into the live `/chat` path (that's Phase E's Planner's job)
+
+**A real bug was found and fixed during this phase**, not just a clean build: `SummarizeStep` initially treated an Ollama-down failure as success (because `reasoning_service.generate()` returns a friendly string rather than raising, which is correct for chat UX but wrong for a Step checking success programmatically) — it nearly saved `"Could not reach Ollama..."` into memory as a real research summary. Fixed by adding `reasoning_service.generate_strict()`, which raises on the same failures. See `STATUS.md` for the full story — this distinction (`generate()` for humans, `generate_strict()` for automated callers) matters for every Step/Workflow/Evolution-check going forward.
+
+See `STATUS.md` for verification details on each item.
 
 ## Phase E — Planning, Validation, Decision
 
 Only start once there are enough Skills/Steps that a linear if/else chain in `main.py` genuinely can't route between them anymore.
 
+- [ ] E0. (carried over from Phase C/D) Apply the `generate_strict()` fix to `execute_plugin`'s code-gen path in `plugin_manager.py` — same bug class as the one fixed in `SummarizeStep`, just not yet applied here. Small, well-understood, low-risk.
 - [ ] E1. Introduce a minimal Planner that chooses between Tool / Skill / raw reasoning based on a capability registry, not keyword matching
 - [ ] E2. Add a Validator step between generation and delivery (start with deterministic checks — tests/lint — before adding LLM-based validation)
 - [ ] E3. Add a Decision step: deliver / retry / escalate, instead of always delivering

@@ -1,17 +1,17 @@
 # Aether — Current Status
 
-_Last updated: July 19, 2026, after completing Phase A, B, and C. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 19, 2026, after completing Phase A, B, C, and D. Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 ## Snapshot
 
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C complete.** Security fixed, routing unified, memory upserts, formal Tool contract + registry, single Reasoning Service entry point, Experience log. |
-| Commits | Phase A (`e4720c2`) and Phase B (`57f3dd1`) committed and pushed. Phase C changes below not yet committed. |
-| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration across all 3 phases |
+| Current state | **Phase A + B + C + D complete.** Security fixed, routing unified, memory upserts, formal Tool contract, Reasoning Service, Experience log, and now a real Step/Skill abstraction. |
+| Commits | Phase A (`e4720c2`), B (`57f3dd1`), C (`c299fbf`) committed and pushed. Phase D changes below not yet committed. |
+| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration across all 4 phases |
 | Critical blockers | 0 |
-| Next phase | `ROADMAP.md` → Phase D (Skill/Step abstraction) |
+| Next phase | `ROADMAP.md` → Phase E (Planning, Validation, Decision) |
 
 ## How to run it now
 
@@ -23,32 +23,36 @@ Apply new migrations after pulling: `.venv/bin/alembic upgrade head`.
 
 ## Resolved — Phase A (Security & Correctness) — committed `e4720c2`
 
-Pooled SQLAlchemy engine, safe math eval (no `eval()`), `bwrap`-sandboxed code execution, allowlisted file reads, Alembic migrations, `structlog` + request IDs. See prior status entries for verification details (preserved in git history of this file).
+Pooled SQLAlchemy engine, safe math eval (no `eval()`), `bwrap`-sandboxed code execution, allowlisted file reads, Alembic migrations, `structlog` + request IDs.
 
 ## Resolved — Phase B (Architecture Cleanup) — committed `57f3dd1`
 
 Unified routing (`services/routing.py`), LLM-based memory extraction, memory upserts via unique constraint + `ON CONFLICT`, frontend duplicate-call fix.
 
-## Resolved — Phase C (Tool Service Formalization) — not yet committed
+## Resolved — Phase C (Tool Service Formalization) — committed `c299fbf`
 
-1. ✅ **Tool contract** — `services/tools/base.py` defines `Tool` (name, description, `InputModel`, `execute()`) and `ToolResult`. Input schemas are real JSON Schema via pydantic's `model_json_schema()` — verified `registry.describe_all()` produces a schema a future Planning Service could consume directly.
-2. ✅ **Tools refactored to be deterministic-only** — per `ARCHITECTURE.md`'s "Tools never perform reasoning": `file_reader.read_file()` and `web_search.web_search()` now take already-structured input (a filename, a clean query) instead of parsing natural language themselves. That parsing moved to `plugin_manager.py`, which is where the reasoning steps belong. `CodeTool`, `FileTool`, `WebTool` in `services/tools/` wrap the three plugins.
-3. ✅ **`ToolRegistry`** (`services/tools/registry.py`) — tools are registered once at import time; `plugin_manager.py` now dispatches through `registry.get(name)` instead of an if/elif chain. Adding a 4th tool means writing one class and one `.register()` call.
-4. ✅ **Reasoning Service entry point** — `services/reasoning_service.py` is now the only module that imports `ollama_service` directly. `plugin_manager.py`, `memory_extraction.py`, and `main.py` all call `reasoning_service.generate()`. Adding a second model provider later means changing this one file.
-5. ✅ **Experience log** — new `experiences` table (Alembic `3d051fbf7d64`, purely additive) records `{project_id, request_id, prompt, tool, tool_source, model, success, latency_ms, timestamp}` for every `/chat` call. Verified live: a `9*9` request produced a matching row with the same `request_id` as its structured logs, `tool_source: "rule"`, `success: true`, sub-millisecond latency.
+Tool contract (`services/tools/base.py`), 3 tools refactored to be deterministic-only, `ToolRegistry`, single Reasoning Service entry point, `experiences` table.
 
-Verified end-to-end: the full deterministic path (rule-routed math → `CodeTool` → `safe_eval_math`) works with zero LLM calls and zero network access, exactly as before the refactor — the Tool contract changes didn't regress any Phase A protections (traversal blocking, sandboxing all re-verified against the new `Tool.execute()` interface).
+## Resolved — Phase D (Skill & Step Abstraction) — not yet committed
 
-## Known gap (not introduced by Phase C, just made visible by it)
+1. ✅ **Step contract** — `services/steps/base.py` defines `Step` (name, description, `run(context)`) and `StepResult`. Unlike a Tool, a Step is allowed to call the Reasoning Service — documented explicitly as the one place the "tools never reason" rule doesn't apply, and why.
+2. ✅ **Skill contract** — `services/skills/base.py` defines `Skill` as an ordered list of Steps sharing one context dict. `Skill.run()` stops immediately if any Step fails (the minimal validation gate for this phase — a real Validator Service is Phase E).
+3. ✅ **`ResearchTopicSkill`** (`services/skills/research_topic_skill.py`) — composes `WebSearchStep` (deterministic, wraps the `web` Tool) → `SummarizeStep` (reasoning) → `SaveMemoryStep` (deterministic, wraps `save_memory`). Deliberately **not wired into the live `/chat` path** — deciding when to invoke a Skill vs. a Tool vs. raw reasoning is a Planning Service's job (Phase E); wiring it in now would mean guessing at Planning Service behavior ahead of building it.
 
-When Ollama is unreachable, `execute_plugin`'s code-gen path (LLM writes code → `CodeTool` runs it) doesn't check whether the LLM call itself failed before feeding the result into the sandbox as "code" — it fails safely (a Python `SyntaxError` inside the sandbox, not a security issue) but isn't a clean error message. Worth a small fix in Phase D.
+**A real bug was found and fixed while testing this phase**, not just a clean success story: `SummarizeStep` initially used the graceful `reasoning_service.generate()` (which turns Ollama failures into a friendly string rather than raising, correct for chat UX) — so when Ollama was down, the Step reported `success: True` with `"Could not reach Ollama..."` as if it were a real summary, and `SaveMemoryStep` actually wrote that string into memory as `last_research`. Fixed by adding `reasoning_service.generate_strict()`, which raises `ReasoningError` on the same failure cases instead of returning a string — used by `SummarizeStep` specifically because its result is checked programmatically, not read by a human. Re-verified: the Skill now stops at `summarize` with `success: False` when Ollama is down, and never reaches `save_memory`. The corrupted test row was found in the live `memory` table and deleted; your 3 original rows are untouched.
+
+**This is worth remembering for Phase E and beyond**: any automated caller that checks a result's success/failure programmatically must use `generate_strict()`, not `generate()`. `generate()` is only safe for paths where a human reads the output directly (the main chat response).
+
+## Known gap (from Phase C, not yet fixed)
+
+`execute_plugin`'s code-gen path (LLM writes code → `CodeTool` runs it) still uses the graceful `generate()`, so if the LLM call fails, the failure string gets fed into the sandbox as if it were code — same class of bug as the one just fixed in `SummarizeStep`, just not yet applied here. Fails safely (a `SyntaxError` inside the sandbox) but should switch to `generate_strict()` too. Small, low-risk fix — good Phase E starter item.
 
 ## What's already right — keep these
 
-- **`services/tools/`** — the Tool contract is the correct foundation for Phase D's Skill abstraction (a Skill will be a sequence of Tool calls sharing context).
-- **`services/reasoning_service.py`** — correct single seam for model independence.
-- **`experiences` table** — correct foundation for a real Evolution Service later (Phase F+), once there's enough volume to learn from.
+- **`services/steps/` + `services/skills/`** — the abstraction is proven with a real multi-step composition, not just a contract on paper.
+- **`generate()` vs `generate_strict()`** — a genuinely useful distinction that emerged from a real bug, not speculative design. Any future Step, Workflow, or Evolution proposal-checker should default to the strict variant.
+- **`experiences` table** — still the correct foundation for a real Evolution Service later.
 
 ## Immediate next action
 
-Review and commit the Phase C changes, then start `ROADMAP.md` → Phase D.
+Review and commit the Phase D changes (including the `generate_strict()` fix), then start `ROADMAP.md` → Phase E. Consider applying the same `generate_strict()` fix to the Phase C code-gen path first, since it's now a known, understood, and cheap fix.
