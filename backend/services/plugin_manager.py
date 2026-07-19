@@ -2,12 +2,46 @@ from plugins.code_runner import run_code
 from plugins.file_reader import read_file
 from plugins.web_search import web_search
 from services.ollama_service import generate_response
+import ast
+import operator
 import re
 
 
 # -------- SIMPLE MATH DETECTION --------
 def is_simple_math(prompt: str):
     return re.fullmatch(r"[0-9+\-*/(). ]+", prompt.strip()) is not None
+
+
+# -------- SAFE MATH EVALUATION (no eval()) --------
+# Only literals and +, -, *, /, parentheses are supported. Anything else
+# (names, calls, attribute access, imports) raises and is rejected below,
+# unlike eval() which executes arbitrary Python.
+_SAFE_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
+def safe_eval_math(expr: str):
+    """Evaluate a simple arithmetic expression without eval()."""
+
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPERATORS:
+            return _SAFE_OPERATORS[type(node.op)](_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPERATORS:
+            return _SAFE_OPERATORS[type(node.op)](_eval(node.operand))
+        raise ValueError("Unsupported expression")
+
+    parsed = ast.parse(expr, mode="eval")
+    return _eval(parsed)
 
 
 # -------- FALLBACK RULE-BASED DETECTION --------
@@ -78,12 +112,13 @@ def execute_plugin(plugin_name: str, prompt: str):
     # -------- PYTHON TOOL --------
     if plugin_name == "python":
 
-        # Fast path: simple math
+        # Fast path: simple math (safe_eval_math never executes arbitrary code,
+        # unlike eval() — it only walks a restricted arithmetic AST)
         if is_simple_math(prompt):
             try:
-                result = eval(prompt)
+                result = safe_eval_math(prompt)
                 return f"Output:\n{result}"
-            except:
+            except Exception:
                 pass
 
         # AI-generated code

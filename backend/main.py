@@ -1,8 +1,12 @@
-from fastapi import FastAPI
+import time
+import uuid
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
+from services.logging_config import configure_logging, get_logger
 from services.ollama_service import generate_response
 from services.router import route_model
 from storage.project_store import (
@@ -18,7 +22,42 @@ from storage.project_store import (
 )
 from services.plugin_manager import ai_decide_plugin, decide_plugin, execute_plugin
 
+configure_logging()
+logger = get_logger("aether.main")
+
 app = FastAPI()
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Every request gets a short request_id, bound into structlog's
+    contextvars so every log line emitted while handling it — from any
+    module — is automatically tagged. This is what makes it possible to
+    trace one /chat call across routing, plugin execution, and storage."""
+    import structlog
+
+    request_id = str(uuid.uuid4())[:8]
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+
+    start = time.monotonic()
+    logger.info("request_started", path=request.url.path, method=request.method)
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.error("request_failed", path=request.url.path, exc_info=True)
+        raise
+
+    duration_ms = round((time.monotonic() - start) * 1000, 1)
+    logger.info(
+        "request_finished",
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 # -------- CORS --------
 app.add_middleware(
@@ -136,6 +175,7 @@ def chat(request: ChatRequest):
     # -------- Generate Response --------
     # -------- Plugin Detection --------
     plugin = ai_decide_plugin(prompt)
+    logger.info("chat_routed", model=model, plugin=plugin, project_id=project_id)
 
     if plugin:
         response = execute_plugin(plugin, prompt)
