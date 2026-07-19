@@ -43,8 +43,6 @@ function App() {
     }
 
     fetchProjects();
-
-    fetchProjects();
   };
 
   // -------- Load Project --------

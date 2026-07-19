@@ -1,64 +1,66 @@
 # Aether — Current Status
 
-_Last updated: July 19, 2026, after completing Phase A. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 19, 2026, after completing Phase A and Phase B. Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 ## Snapshot
 
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A complete.** All 4 Critical issues fixed and verified. Phase 2–3 functionality preserved, now on a safe foundation. |
-| Commits | 3 on disk (not yet committed: the Phase A changes below) |
-| Local usage | 1 project, 25 chats intact — verified byte-identical count before/after the SQLAlchemy migration |
-| Critical blockers | **0** — see "Resolved" section below |
-| Next phase | `ROADMAP.md` → Phase B (routing unification, memory upsert) |
+| Current state | **Phase A + Phase B complete.** Security/correctness fixed, routing unified, memory upserts, migrations tracked. |
+| Commits | Phase A committed and pushed (`e4720c2`). Phase B changes below not yet committed. |
+| Local usage | 1 project, 3 memory rows, 25 chats — all verified intact through both phases' migrations |
+| Critical blockers | 0 |
+| Important issues open | 0 (all 5 from Phase A/B resolved) |
+| Next phase | `ROADMAP.md` → Phase C (Tool Service formalization) |
 
 ## How to run it now
-
-The backend has new dependencies (SQLAlchemy, Alembic, structlog) installed in a dedicated venv rather than system Python:
 
 ```bash
 cd backend
 .venv/bin/uvicorn main:app --reload --port 8000
 ```
 
-If you ever need to recreate the venv:
+New dependencies live in `backend/.venv` (SQLAlchemy, Alembic, structlog), not system Python. Recreate with:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install fastapi uvicorn pydantic requests sqlalchemy alembic structlog
 ```
 
-Code execution requires `bwrap` (bubblewrap) on the host — already present on this machine. If missing: `sudo pacman -S bubblewrap`.
+Code execution requires `bwrap` (present on this machine). File-reading is scoped to `~/aether-workspace/`.
 
-File-reading is now scoped to `~/aether-workspace/` (created automatically). Files elsewhere are refused.
+To apply new migrations after pulling changes: `.venv/bin/alembic upgrade head`.
 
-## Resolved — Phase A (Security & Correctness)
+## Resolved — Phase A (Security & Correctness) — committed as `e4720c2`
 
-All verified working together via a live end-to-end test (uvicorn + curl), not just unit-tested in isolation.
+1. ✅ Global SQLite singleton → pooled SQLAlchemy engine
+2. ✅ `eval()` → AST-based safe math evaluator
+3. ✅ Bypassable sandbox → `bwrap` isolation (no network, read-only fs, resource limits)
+4. ✅ Arbitrary file read → allowlisted `~/aether-workspace/`
+5. ✅ No migrations → Alembic, stamped at baseline, zero data loss
+6. ✅ Silent failures → `structlog` + request-ID middleware
 
-1. ✅ **Global SQLite singleton** → `db/database.py` now uses a pooled SQLAlchemy engine (`pool_size=10, max_overflow=20`); every call in `storage/project_store.py` opens/closes its own session. Verified: pre-existing 25 chats read back correctly after the swap.
-2. ✅ **`eval()` on user input** → replaced with `safe_eval_math()` in `plugin_manager.py`, an AST walker that only accepts numeric literals and `+ - * /`. Anything else raises and falls through to the LLM path.
-3. ✅ **Code sandbox bypassable** → `code_runner.py` now runs all generated code inside `bwrap` with `--unshare-all` (no network, no PID/IPC visibility), a read-only root filesystem, and `ulimit`-enforced CPU/memory/process caps. Verified live: outbound socket connection fails with "Network is unreachable"; write to `/etc/passwd` fails with "No such file or directory" (the path isn't even visible); an infinite loop is killed at the 5s timeout.
-4. ✅ **Arbitrary file read** → `file_reader.py` now resolves every candidate path against an allowlisted `~/aether-workspace/` directory using `pathlib`, rejecting anything that resolves outside it. Verified: `../../../etc/passwd` is refused; a real file inside the workspace reads correctly.
+## Resolved — Phase B (Architecture Cleanup) — not yet committed
 
-Also folded into this pass (originally slated for Phase B, moved up because they were touched by the same files):
+1. ✅ **Routing unified** — new `services/routing.py` replaces the two disconnected systems (`router.py`'s model selection + `plugin_manager.py`'s always-on LLM tool decision). One `route(prompt, mode)` call now returns `{model, tool, tool_source}`. It tries the free rule-based `decide_plugin()` first and only falls back to an LLM call when the rules don't match — verified live: `"search python news"` was routed with `tool_source: "rule"`, meaning zero extra Ollama calls were spent deciding to use the web tool.
+2. ✅ **Memory extraction is now LLM-based** — `services/memory_extraction.py` asks the model for structured `{key: value}` facts instead of string-matching fixed phrases like "i like"/"i prefer". Falls back to `{}` (no facts) on any parse failure rather than raising.
+3. ✅ **Memory upserts** — added a `UniqueConstraint("project_id", "key")` to `Memory` via Alembic migration `f33fab44be66` (SQLite batch-mode table rebuild; existing 3 rows verified intact after). `save_memory()` now uses `INSERT ... ON CONFLICT DO UPDATE`. Verified live: saving `name` twice with different values leaves exactly one row with the latest value, not two.
+4. ✅ **Frontend duplicate call removed** — `fetchProjects()` was called twice in `createProject()` in `App.js`; now called once.
+5. ✅ **Bare `except:` blocks** — none remain; Phase A's `structlog`-based error handling already covered the modules touched here (`ollama_service.py`, `project_store.py`).
 
-5. ✅ **Alembic migrations** — initialized and stamped at a baseline revision matching the pre-existing schema exactly (no destructive ALTERs run against your live data). Future schema changes are real migrations from here on.
-6. ✅ **Structured logging** — `structlog` + a request-ID middleware in `main.py`. Every request gets a short ID threaded through routing, plugin execution, and the Ollama call, so one failing request can be traced end-to-end in the logs instead of vanishing into a bare `except`. Verified live: a single `request_id` appeared on 5 log lines spanning the full `/chat` call, including two `ollama_unreachable` errors that previously would have been silent.
+## Important (Phase C candidates — see ROADMAP.md)
 
-## Important (Phase B — not yet started)
-
-- Memory extraction is still string-matching (`extract_memory` in `main.py`) — low recall, writes unbounded duplicate rows, no upsert. The ORM model (`db/orm_models.py`) has a comment marking where the upsert constraint should go once this lands.
-- Two disconnected routing systems: `router.py` (model selection) and `plugin_manager.py` (`decide_plugin` vs `ai_decide_plugin`) don't share state. `decide_plugin` is imported in `main.py` but never called.
-- Every chat request still costs 2+ sequential Ollama calls minimum (routing decision, then generation).
-- Frontend: `fetchProjects()` called twice in `createProject()` in `App.js` — not yet fixed.
+None outstanding from Phase A/B. Next real gaps are architectural, not bugs:
+- No formal Tool contract (input/output schema) — plugins are still ad hoc functions
+- No model-provider abstraction — `ollama_service.py` is still the only path to an LLM, hardcoded
+- No Experience log — executions aren't recorded anywhere for future learning
 
 ## What's already right — keep these
 
-- **Plugin architecture** (`ai_decide_plugin` → `execute_plugin`) is the correct embryo of a Tool Service — now also the correct embryo of a *safe* Tool Service.
+- **`services/routing.py`** is now the single source of truth for "what should handle this request" — this is the natural seam where a future Planning Service will attach.
 - **`project_id` as a first-class entity** — correct precursor to Project Brain.
-- **`router.py` as an isolated concern** — routing strategy can evolve independently of the LLM wrapper (still needs unifying with plugin routing in Phase B).
+- **Upsert-based memory** — correct precursor to a real Memory Service; the (project_id, key) constraint is the right primitive to build typed facts on top of later.
 
 ## Immediate next action
 
-Commit the Phase A changes, then start `ROADMAP.md` → Phase B.
+Review and commit the Phase B changes, then start `ROADMAP.md` → Phase C.

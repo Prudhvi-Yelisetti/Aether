@@ -23,15 +23,12 @@ class Chat(Base):
 
 class Memory(Base):
     __tablename__ = "memory"
+    __table_args__ = (
+        UniqueConstraint("project_id", "key", name="uq_memory_project_key"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, nullable=False)
     key = Column(String, nullable=False)
     value = Column(String)
     timestamp = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    # Phase B (see ROADMAP.md) will add upsert semantics keyed on
-    # (project_id, key) to stop unbounded duplicate memory rows. This
-    # constraint is deliberately NOT added yet — it needs to ship together
-    # with the upsert logic, not before it, or existing duplicate rows will
-    # break migration.

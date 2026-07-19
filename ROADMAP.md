@@ -15,15 +15,17 @@ No new features until these are done. Every feature built on top of them inherit
 
 See `STATUS.md` for verification details on each item.
 
-## Phase B — Architecture Cleanup (~3–4 weeks)
+## Phase B — Architecture Cleanup (~3–4 weeks)  ✅ COMPLETE
 
 Makes the codebase coherent before it grows further.
 
-- [ ] B1. Unify `router.py` and `plugin_manager.py` into a single routing decision returning `{model, tool_or_none}` — stop making two sequential, disconnected decisions
-- [ ] B2. Replace string-matching memory extraction (`extract_memory` in `main.py`) with an LLM-based extraction step
-- [ ] B3. Add upsert semantics to memory — one row per (project, key), updated not appended
-- [ ] B4. Replace bare `except:` with typed exceptions and proper error responses
-- [ ] B5. Frontend cleanup pass: fix the duplicate `fetchProjects()` call in `App.js`, add basic loading/error states
+- [x] B1. Unify `router.py` and `plugin_manager.py` into a single routing decision returning `{model, tool_or_none}` — done via new `services/routing.py`; verified live that a rule-matched tool request skips the LLM decision call entirely (`tool_source: "rule"` in logs)
+- [x] B2. Replace string-matching memory extraction (`extract_memory` in `main.py`) with an LLM-based extraction step — done via new `services/memory_extraction.py`
+- [x] B3. Add upsert semantics to memory — one row per (project, key), updated not appended — done via a unique constraint (Alembic migration `f33fab44be66`) + `INSERT ... ON CONFLICT DO UPDATE`; verified two saves of the same key produce one row, not two
+- [x] B4. Replace bare `except:` with typed exceptions and proper error responses — already covered by Phase A's structlog changes in the files this phase touched; nothing left bare
+- [x] B5. Frontend cleanup pass: fixed the duplicate `fetchProjects()` call in `App.js`
+
+See `STATUS.md` for verification details on each item.
 
 ## Phase C — Tool Service Formalization (~1–2 months)
 

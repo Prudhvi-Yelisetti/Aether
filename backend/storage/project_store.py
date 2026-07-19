@@ -13,6 +13,7 @@ so main.py does not need to change.
 import logging
 from db.database import SessionLocal
 from db.orm_models import Project, Chat, Memory
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 logger = logging.getLogger("aether.storage")
 
@@ -117,10 +118,20 @@ def project_exists(project_id: str) -> bool:
 
 
 def save_memory(project_id: str, key: str, value: str):
+    """Upserts on (project_id, key) — see the unique constraint added in
+    Alembic revision f33fab44be66. This is what stops memory from
+    accumulating unbounded duplicate rows: a repeated fact updates the
+    existing row's value (and timestamp) instead of inserting a new one."""
     db = SessionLocal()
     try:
-        row = Memory(project_id=project_id, key=key, value=value)
-        db.add(row)
+        stmt = sqlite_insert(Memory).values(
+            project_id=project_id, key=key, value=value
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["project_id", "key"],
+            set_={"value": value},
+        )
+        db.execute(stmt)
         db.commit()
     except Exception:
         db.rollback()

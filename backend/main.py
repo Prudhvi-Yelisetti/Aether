@@ -8,7 +8,7 @@ from typing import Optional
 
 from services.logging_config import configure_logging, get_logger
 from services.ollama_service import generate_response
-from services.router import route_model
+from services.routing import route
 from storage.project_store import (
     create_project,
     get_projects,
@@ -20,7 +20,8 @@ from storage.project_store import (
     create_chat,
     get_project_full_data
 )
-from services.plugin_manager import ai_decide_plugin, decide_plugin, execute_plugin
+from services.plugin_manager import execute_plugin
+from services.memory_extraction import extract_memory_facts
 
 configure_logging()
 logger = get_logger("aether.main")
@@ -81,29 +82,6 @@ class ProjectRequest(BaseModel):
     name: str
 
 
-# -------------------- MEMORY EXTRACTION --------------------
-
-def extract_memory(prompt: str):
-    prompt_lower = prompt.lower()
-    memory = []
-
-    patterns = {
-        "name": ["my name is", "i am called"],
-        "preference": ["i like", "i love", "i prefer"],
-        "skill": ["i know", "i am good at"],
-        "goal": ["i want to", "i plan to"]
-    }
-
-    for key, keywords in patterns.items():
-        for keyword in keywords:
-            if keyword in prompt_lower:
-                value = prompt_lower.split(keyword)[-1].strip()
-                if value:
-                    memory.append((key, value))
-
-    return memory
-
-
 # -------------------- ROUTES --------------------
 
 @app.get("/")
@@ -156,13 +134,9 @@ def chat(request: ChatRequest):
     if project_id and not chat_id:
         chat_id = create_chat(project_id)
 
-    # -------- Model Selection --------
-    if mode == "fast":
-        model = "mistral"
-    elif mode == "powerful":
-        model = "llama3"
-    else:
-        model = route_model(prompt)
+    # -------- Unified Routing (model + tool decided together, see routing.py) --------
+    decision = route(prompt, mode)
+    model = decision.model
 
     # -------- Fetch Context --------
     history = None
@@ -173,20 +147,16 @@ def chat(request: ChatRequest):
         memory = get_memory(project_id)
 
     # -------- Generate Response --------
-    # -------- Plugin Detection --------
-    plugin = ai_decide_plugin(prompt)
-    logger.info("chat_routed", model=model, plugin=plugin, project_id=project_id)
-
-    if plugin:
-        response = execute_plugin(plugin, prompt)
+    if decision.tool:
+        response = execute_plugin(decision.tool, prompt)
     else:
         response = generate_response(prompt, model, history, memory)
 
-    # -------- Memory Extraction --------
+    # -------- Memory Extraction (LLM-based, upserted — see memory_extraction.py) --------
     if project_id:
-        extracted = extract_memory(prompt)
+        facts = extract_memory_facts(prompt)
 
-        for key, value in extracted:
+        for key, value in facts.items():
             save_memory(project_id, key, value)
 
     # -------- Store Chat --------
