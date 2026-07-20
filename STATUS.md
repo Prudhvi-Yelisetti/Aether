@@ -1,17 +1,17 @@
 # Aether — Current Status
 
-_Last updated: July 19, 2026, after completing Phase A, B, C, and D. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 20, 2026, after completing Phase A, B, C, D, and building out Skills toward Phase E1. Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 ## Snapshot
 
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C + D complete.** Security fixed, routing unified, memory upserts, formal Tool contract, Reasoning Service, Experience log, and now a real Step/Skill abstraction. |
-| Commits | Phase A (`e4720c2`), B (`57f3dd1`), C (`c299fbf`) committed and pushed. Phase D changes below not yet committed. |
-| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration across all 4 phases |
+| Current state | **Phase A + B + C + D complete. E0 complete.** 3 real Skills now exist (building toward E1's precondition). |
+| Commits | Phase A (`e4720c2`), B (`57f3dd1`), C (`c299fbf`), D (`d9a8599`) committed and pushed. E0 + the new Skills below not yet committed. |
+| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and every test run across all phases |
 | Critical blockers | 0 |
-| Next phase | `ROADMAP.md` → Phase E (Planning, Validation, Decision) |
+| Next phase | Once E1 is unblocked (see below), build the Planner |
 
 ## How to run it now
 
@@ -21,38 +21,43 @@ cd backend
 ```
 Apply new migrations after pulling: `.venv/bin/alembic upgrade head`.
 
-## Resolved — Phase A (Security & Correctness) — committed `e4720c2`
+## Resolved — Phases A–D
 
-Pooled SQLAlchemy engine, safe math eval (no `eval()`), `bwrap`-sandboxed code execution, allowlisted file reads, Alembic migrations, `structlog` + request IDs.
+See git history of this file (or the commits themselves: `e4720c2`, `57f3dd1`, `c299fbf`, `d9a8599`) for full details. Summary: pooled DB, sandboxed code execution, allowlisted file access, unified routing, upserted memory, formal Tool contract + registry, single Reasoning Service entry point, Experience log, Step/Skill abstraction.
 
-## Resolved — Phase B (Architecture Cleanup) — committed `57f3dd1`
+## Resolved — E0 (carried over from C/D) — not yet committed
 
-Unified routing (`services/routing.py`), LLM-based memory extraction, memory upserts via unique constraint + `ON CONFLICT`, frontend duplicate-call fix.
+`execute_plugin`'s code-gen path and web query-extraction now use `generate_strict()` instead of `generate()`. Verified live with Ollama down: code-gen returns `"Could not generate code: ..."` instead of feeding the failure string into the sandbox; web search falls back to the raw prompt instead of searching for the literal error text.
 
-## Resolved — Phase C (Tool Service Formalization) — committed `c299fbf`
+## In progress — preparing for E1 — not yet committed
 
-Tool contract (`services/tools/base.py`), 3 tools refactored to be deterministic-only, `ToolRegistry`, single Reasoning Service entry point, `experiences` table.
+`ROADMAP.md`'s Phase E header requires "enough Skills/Steps that a linear if/else chain genuinely can't route between them anymore" before building a Planner. That wasn't true with only `ResearchTopicSkill` existing (Phase D's single proof-of-concept, unwired). Prudhvi chose to build more Skills first rather than build the Planner against one example. Two more Skills now exist:
 
-## Resolved — Phase D (Skill & Step Abstraction) — not yet committed
+1. **`FileDigestSkill`** (`services/skills/file_digest_skill.py`) — `filename` → read file (Tool) → summarize (reasoning) → save to memory (Tool). **Reuses the exact same `SummarizeStep` and `SaveMemoryStep` classes as `ResearchTopicSkill`** — only the predecessor step and the context keys passed in differ. No new "explain a file" implementation was written.
+2. **`CalculateAndExplainSkill`** (`services/skills/calculate_and_explain_skill.py`) — `code` → run it (Tool) → explain the result (reasoning). Deliberately a different shape: 2 steps not 3, doesn't touch memory at all. Also reuses `SummarizeStep`.
 
-1. ✅ **Step contract** — `services/steps/base.py` defines `Step` (name, description, `run(context)`) and `StepResult`. Unlike a Tool, a Step is allowed to call the Reasoning Service — documented explicitly as the one place the "tools never reason" rule doesn't apply, and why.
-2. ✅ **Skill contract** — `services/skills/base.py` defines `Skill` as an ordered list of Steps sharing one context dict. `Skill.run()` stops immediately if any Step fails (the minimal validation gate for this phase — a real Validator Service is Phase E).
-3. ✅ **`ResearchTopicSkill`** (`services/skills/research_topic_skill.py`) — composes `WebSearchStep` (deterministic, wraps the `web` Tool) → `SummarizeStep` (reasoning) → `SaveMemoryStep` (deterministic, wraps `save_memory`). Deliberately **not wired into the live `/chat` path** — deciding when to invoke a Skill vs. a Tool vs. raw reasoning is a Planning Service's job (Phase E); wiring it in now would mean guessing at Planning Service behavior ahead of building it.
+**A real design gap was found and fixed while building these**, not just two more clean Skills: `SummarizeStep` and `SaveMemoryStep` originally hardcoded which context key they read from (`"web_search"`, `"summarize"`) — meaning they looked reusable but weren't actually reusable by a second Skill without duplicating them. Fixed by making both take a configurable `source_key` (and `SaveMemoryStep`, a configurable `memory_key`) via their constructors. `ResearchTopicSkill` was updated to pass these explicitly (`source_key="web_search"`, etc.) rather than relying on the old implicit defaults, so the reuse is visible in the code, not hidden behind default-parameter coincidence.
 
-**A real bug was found and fixed while testing this phase**, not just a clean success story: `SummarizeStep` initially used the graceful `reasoning_service.generate()` (which turns Ollama failures into a friendly string rather than raising, correct for chat UX) — so when Ollama was down, the Step reported `success: True` with `"Could not reach Ollama..."` as if it were a real summary, and `SaveMemoryStep` actually wrote that string into memory as `last_research`. Fixed by adding `reasoning_service.generate_strict()`, which raises `ReasoningError` on the same failure cases instead of returning a string — used by `SummarizeStep` specifically because its result is checked programmatically, not read by a human. Re-verified: the Skill now stops at `summarize` with `success: False` when Ollama is down, and never reaches `save_memory`. The corrupted test row was found in the live `memory` table and deleted; your 3 original rows are untouched.
+Two new deterministic Steps were also added to support this: `ReadFileStep` (wraps the `file` Tool) and `RunCodeStep` (wraps the `code` Tool) — both trivial wrappers, same pattern as `WebSearchStep`.
 
-**This is worth remembering for Phase E and beyond**: any automated caller that checks a result's success/failure programmatically must use `generate_strict()`, not `generate()`. `generate()` is only safe for paths where a human reads the output directly (the main chat response).
+Added `services/skills/registry.py` (`SkillRegistry`, mirroring `ToolRegistry`) — **not** the Planner itself, just makes "what Skills exist" queryable the way Tools already are. `registry.describe_all()` returns all 3 Skills with their step sequences.
 
-## Known gap (from Phase C, not yet fixed)
+**Verified live** (Ollama still down throughout, same as every prior verification this session):
+- All 3 Skills registered and correctly described via `SkillRegistry.describe_all()`
+- `CalculateAndExplainSkill`: `RunCodeStep` correctly computed `sum(range(1,101)) = 5050` deterministically; `SummarizeStep` (reused, different `source_key`) correctly fail-gated with Ollama down
+- `FileDigestSkill`: legitimate file reads work; **Phase A's path-traversal protection still holds** through this new Skill (`../../../etc/passwd` correctly blocked at the `read_file` step)
+- No test data reached the real `memory` table in any failed run — confirmed via direct DB query (still exactly 3 original rows)
 
-`execute_plugin`'s code-gen path (LLM writes code → `CodeTool` runs it) still uses the graceful `generate()`, so if the LLM call fails, the failure string gets fed into the sandbox as if it were code — same class of bug as the one just fixed in `SummarizeStep`, just not yet applied here. Fails safely (a `SyntaxError` inside the sandbox) but should switch to `generate_strict()` too. Small, low-risk fix — good Phase E starter item.
+## E1 status: still gated, now on a real decision
+
+3 Skills with genuinely different shapes (3-step w/ memory, 3-step w/ memory but different source, 2-step w/o memory) now exist. This is a reasonable amount of variety for a Planner to discriminate between — Prudhvi should decide whether this is "enough" or whether to build further before starting E1.
 
 ## What's already right — keep these
 
-- **`services/steps/` + `services/skills/`** — the abstraction is proven with a real multi-step composition, not just a contract on paper.
-- **`generate()` vs `generate_strict()`** — a genuinely useful distinction that emerged from a real bug, not speculative design. Any future Step, Workflow, or Evolution proposal-checker should default to the strict variant.
-- **`experiences` table** — still the correct foundation for a real Evolution Service later.
+- **Configurable Step constructors (`source_key`, `memory_key`)** — this is the actual mechanism that makes Step reuse real rather than aspirational. Any new Step should default to this pattern.
+- **`services/skills/registry.py`** — correct minimal scaffolding for E1; resist the urge to add selection logic here, that's the Planner's job specifically.
+- **3 genuinely distinct Skill shapes** — better Planner-design input than 3 skills that all happen to look the same.
 
 ## Immediate next action
 
-Review and commit the Phase D changes (including the `generate_strict()` fix), then start `ROADMAP.md` → Phase E. Consider applying the same `generate_strict()` fix to the Phase C code-gen path first, since it's now a known, understood, and cheap fix.
+Review and commit the E0 fix + new Skills, then decide on E1 (build the Planner now, or keep expanding the Skill set first).

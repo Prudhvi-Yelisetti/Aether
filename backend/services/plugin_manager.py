@@ -1,4 +1,4 @@
-from services.reasoning_service import generate
+from services.reasoning_service import generate, generate_strict, ReasoningError
 from services.tools.registry import registry
 import ast
 import operator
@@ -109,6 +109,16 @@ Request: {prompt}
 # natural-language -> structured-input translation for each tool happens
 # here (it's a reasoning step), while the Tool itself only does deterministic
 # execution — see the module docstring in services/tools/base.py.
+#
+# generate() vs generate_strict(): the FINAL summaries shown directly to a
+# human use generate() — if generation fails there, showing the friendly
+# "Could not reach Ollama..." string as the answer is the correct, honest
+# response. But intermediate LLM calls whose output feeds into something
+# else (code about to be executed, a query about to be searched) use
+# generate_strict() — see the ReasoningError catches below. Getting this
+# backwards was a real bug found and fixed in Phase D's SummarizeStep (see
+# ROADMAP.md's E0 / STATUS.md for the story); this is that same fix applied
+# here.
 def execute_plugin(plugin_name: str, prompt: str) -> str:
 
     tool = registry.get(plugin_name)
@@ -138,7 +148,13 @@ Rules:
 
 Request: {prompt}
 """
-        code = generate(code_prompt, model="llama3")
+        try:
+            code = generate_strict(code_prompt, model="llama3")
+        except ReasoningError as e:
+            # Fails cleanly with a real message instead of feeding the
+            # failure string into the sandbox as if it were Python.
+            return f"Could not generate code: {e}"
+
         result = tool.execute(tool.InputModel(code=code))
         return result.output
 
@@ -169,7 +185,12 @@ Return ONLY the search query.
 
 Request: {prompt}
 """
-        clean_query = generate(query_prompt, model="mistral").strip()
+        try:
+            clean_query = generate_strict(query_prompt, model="mistral").strip()
+        except ReasoningError:
+            # Fall back to the raw prompt as the query rather than
+            # searching for the failure string itself.
+            clean_query = prompt
 
         result = tool.execute(tool.InputModel(query=clean_query))
         if not result.success:

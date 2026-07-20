@@ -55,10 +55,12 @@ See `STATUS.md` for verification details on each item.
 
 Only start once there are enough Skills/Steps that a linear if/else chain in `main.py` genuinely can't route between them anymore.
 
-- [ ] E0. (carried over from Phase C/D) Apply the `generate_strict()` fix to `execute_plugin`'s code-gen path in `plugin_manager.py` — same bug class as the one fixed in `SummarizeStep`, just not yet applied here. Small, well-understood, low-risk.
-- [ ] E1. Introduce a minimal Planner that chooses between Tool / Skill / raw reasoning based on a capability registry, not keyword matching
+- [x] E0. (carried over from Phase C/D) Apply the `generate_strict()` fix to `execute_plugin`'s code-gen path in `plugin_manager.py` — done; verified live with Ollama down: code-gen path now returns "Could not generate code: ..." instead of feeding the failure string into the sandbox as Python; web query-extraction now falls back to the raw prompt instead of searching for the literal error text
+- [ ] E1. Introduce a minimal Planner that chooses between Tool / Skill / raw reasoning based on a capability registry, not keyword matching — **gated: see note below**
 - [ ] E2. Add a Validator step between generation and delivery (start with deterministic checks — tests/lint — before adding LLM-based validation)
 - [ ] E3. Add a Decision step: deliver / retry / escalate, instead of always delivering
+
+**Note on E1 (July 20, 2026):** this phase's own header condition — "only start once there are enough Skills/Steps that a linear if/else chain genuinely can't route between them anymore" — isn't actually met yet. Phase D produced exactly one Skill (`ResearchTopicSkill`), unwired, as a proof of concept. Building a Planner now would mean designing capability-selection logic against a registry with one real entry, which risks over-fitting the Planner's shape to a single example rather than a genuine variety of capabilities. Before E1: either build 2-3 more real Skills first (so the Planner has something to actually discriminate between), or treat E1 as scaffolding-only for now and revisit once there's real variety. This is a product decision, not a technical one — flagged for Prudhvi rather than decided autonomously.
 
 ## Phase F+ — Governance, Evolution, Distillation, Intent Bus, Cost Engine
 
