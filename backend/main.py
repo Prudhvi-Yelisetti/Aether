@@ -8,7 +8,8 @@ from typing import Optional
 
 from services.logging_config import configure_logging, get_logger
 from services.reasoning_service import generate
-from services.routing import route
+from services.routing import select_model
+from services.planning_service import plan, execute_plan
 from storage.project_store import (
     create_project,
     get_projects,
@@ -20,7 +21,6 @@ from storage.project_store import (
     create_chat,
     get_project_full_data
 )
-from services.plugin_manager import execute_plugin
 from services.memory_extraction import extract_memory_facts
 from storage.experience_store import log_experience
 
@@ -35,7 +35,7 @@ async def request_id_middleware(request: Request, call_next):
     """Every request gets a short request_id, bound into structlog's
     contextvars so every log line emitted while handling it — from any
     module — is automatically tagged. This is what makes it possible to
-    trace one /chat call across routing, plugin execution, and storage."""
+    trace one /chat call across planning, skill/tool execution, and storage."""
     import structlog
 
     request_id = str(uuid.uuid4())[:8]
@@ -122,10 +122,13 @@ def get_project_chats_api(project_id: str):
 
 @app.post("/chat")
 def chat(request: ChatRequest):
+    import structlog
+
     prompt = request.prompt
     mode = request.mode
     project_id = request.project_id
     chat_id = request.chat_id
+    request_id = structlog.contextvars.get_contextvars().get("request_id")
 
     # -------- Validate Project --------
     if project_id and not project_exists(project_id):
@@ -135,9 +138,8 @@ def chat(request: ChatRequest):
     if project_id and not chat_id:
         chat_id = create_chat(project_id)
 
-    # -------- Unified Routing (model + tool decided together, see routing.py) --------
-    decision = route(prompt, mode)
-    model = decision.model
+    # -------- Model Selection (Reasoning Service's concern, see routing.py) --------
+    model = select_model(prompt, mode)
 
     # -------- Fetch Context --------
     history = None
@@ -147,29 +149,31 @@ def chat(request: ChatRequest):
         history = get_chat_history(project_id, chat_id)
         memory = get_memory(project_id)
 
+    # -------- Planning (Tool / Skill / raw reasoning — see planning_service.py) --------
+    the_plan = plan(prompt, project_id)
+
     # -------- Generate Response --------
     start = time.monotonic()
-    if decision.tool:
-        response = execute_plugin(decision.tool, prompt)
-    else:
+    if the_plan.capability_type == "reasoning":
         response = generate(prompt, model, history, memory)
+    else:
+        response = execute_plan(the_plan, prompt, request_id=request_id)
     latency_ms = round((time.monotonic() - start) * 1000, 1)
 
     # -------- Experience Log (see ARCHITECTURE.md's Experience Service) --------
-    import structlog
-    request_id = structlog.contextvars.get_contextvars().get("request_id")
     success = not (response or "").startswith((
         "Error", "Execution timed out", "Execution blocked",
         "Access denied", "File not found", "Not a file",
         "Search failed", "No useful results", "Could not reach Ollama",
-        "Request to", "Request failed",
+        "Request to", "Request failed", "Could not generate code",
+        "Couldn't complete this",
     ))
     log_experience(
         project_id=project_id,
         request_id=request_id,
         prompt=prompt,
-        tool=decision.tool,
-        tool_source=decision.tool_source,
+        tool=the_plan.capability_name,
+        tool_source=the_plan.source,
         model=model,
         success=success,
         latency_ms=latency_ms,

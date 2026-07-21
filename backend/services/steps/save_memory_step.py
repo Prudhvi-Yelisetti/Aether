@@ -1,4 +1,5 @@
 from services.steps.base import Step, StepResult
+from services.steps.script_meta import ScriptMeta
 from storage.project_store import save_memory
 
 
@@ -11,6 +12,17 @@ class SaveMemoryStep(Step):
     and context['project_id']."""
     name = "save_memory"
     description = "Upserts context[source_key] into memory under memory_key, scoped to context['project_id']."
+    script = ScriptMeta(
+        step_id="step.save_memory",
+        version="1.1.0",
+        owner="prudhvi",
+        history=(
+            "1.0.0: initial implementation, hardcoded source_key='summarize', "
+            "memory_key='last_research', Phase D",
+            "1.1.0: both made configurable so FileDigestSkill could reuse this "
+            "Step with a different memory_key instead of duplicating it",
+        ),
+    )
 
     def __init__(self, source_key: str = "summarize", memory_key: str = "last_research"):
         self.source_key = source_key

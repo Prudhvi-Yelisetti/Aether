@@ -1,4 +1,5 @@
 from services.reasoning_service import generate, generate_strict, ReasoningError
+from services.extraction import extract_filename, extract_search_query, generate_code
 from services.tools.registry import registry
 import ast
 import operator
@@ -106,19 +107,12 @@ Request: {prompt}
 
 # -------- MAIN EXECUTION FUNCTION --------
 # Dispatches through the ToolRegistry (see services/tools/registry.py). The
-# natural-language -> structured-input translation for each tool happens
-# here (it's a reasoning step), while the Tool itself only does deterministic
-# execution — see the module docstring in services/tools/base.py.
-#
-# generate() vs generate_strict(): the FINAL summaries shown directly to a
-# human use generate() — if generation fails there, showing the friendly
-# "Could not reach Ollama..." string as the answer is the correct, honest
-# response. But intermediate LLM calls whose output feeds into something
-# else (code about to be executed, a query about to be searched) use
-# generate_strict() — see the ReasoningError catches below. Getting this
-# backwards was a real bug found and fixed in Phase D's SummarizeStep (see
-# ROADMAP.md's E0 / STATUS.md for the story); this is that same fix applied
-# here.
+# natural-language -> structured-input translation for each tool uses the
+# shared helpers in services/extraction.py (also used by the Planner, so
+# a Tool call and a Skill call extract queries/code/filenames identically
+# rather than duplicating the same prompts) — while the Tool itself only
+# does deterministic execution — see the module docstring in
+# services/tools/base.py.
 def execute_plugin(plugin_name: str, prompt: str) -> str:
 
     tool = registry.get(plugin_name)
@@ -136,20 +130,8 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
             except Exception:
                 pass
 
-        code_prompt = f"""
-You are a Python code generator.
-
-Convert the user's request into correct Python code.
-
-Rules:
-- Output ONLY Python code
-- No explanation
-- Ensure code runs correctly
-
-Request: {prompt}
-"""
         try:
-            code = generate_strict(code_prompt, model="llama3")
+            code = generate_code(prompt)
         except ReasoningError as e:
             # Fails cleanly with a real message instead of feeding the
             # failure string into the sandbox as if it were Python.
@@ -160,10 +142,7 @@ Request: {prompt}
 
     # -------- FILE TOOL --------
     elif plugin_name == "file":
-        # Extracting a filename out of a natural-language prompt is a
-        # reasoning-adjacent parsing step — it lives here, not in FileTool
-        # or read_file(), which now only handle an already-known filename.
-        candidate = next((p for p in prompt.split() if "." in p), None)
+        candidate = extract_filename(prompt)
         if not candidate:
             return "No file specified"
 
@@ -179,18 +158,7 @@ Request: {prompt}
 
     # -------- WEB TOOL --------
     elif plugin_name == "web":
-        query_prompt = f"""
-Extract the main search query from this user request.
-Return ONLY the search query.
-
-Request: {prompt}
-"""
-        try:
-            clean_query = generate_strict(query_prompt, model="mistral").strip()
-        except ReasoningError:
-            # Fall back to the raw prompt as the query rather than
-            # searching for the failure string itself.
-            clean_query = prompt
+        clean_query = extract_search_query(prompt)
 
         result = tool.execute(tool.InputModel(query=clean_query))
         if not result.success:

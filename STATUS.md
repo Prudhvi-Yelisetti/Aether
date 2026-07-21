@@ -1,17 +1,17 @@
 # Aether — Current Status
 
-_Last updated: July 20, 2026, after completing Phase A, B, C, D, and building out Skills toward Phase E1. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 21, 2026, after completing Phase A–D, E0, closing the Step contract's Script/Validation/Metrics gap, and building E1 (the Planner). Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 ## Snapshot
 
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C + D complete. E0 complete.** 3 real Skills now exist (building toward E1's precondition). |
-| Commits | Phase A (`e4720c2`), B (`57f3dd1`), C (`c299fbf`), D (`d9a8599`) committed and pushed. E0 + the new Skills below not yet committed. |
-| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and every test run across all phases |
+| Current state | **Phase A + B + C + D complete. E0 + E1 complete.** A real registry-driven Planner now decides Tool vs. Skill vs. reasoning for every `/chat` request. |
+| Commits | Phase A (`e4720c2`), B (`57f3dd1`), C (`c299fbf`), D (`d9a8599`) committed and pushed. Everything since (Step contract gap fix + E1) not yet committed. |
+| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run this session |
 | Critical blockers | 0 |
-| Next phase | Once E1 is unblocked (see below), build the Planner |
+| Next phase | E2 (Validator) / E3 (Decision), or expand the Skill set further first — Prudhvi's call |
 
 ## How to run it now
 
@@ -21,43 +21,41 @@ cd backend
 ```
 Apply new migrations after pulling: `.venv/bin/alembic upgrade head`.
 
-## Resolved — Phases A–D
+## Resolved — Phases A–D, E0, Step contract gap
 
-See git history of this file (or the commits themselves: `e4720c2`, `57f3dd1`, `c299fbf`, `d9a8599`) for full details. Summary: pooled DB, sandboxed code execution, allowlisted file access, unified routing, upserted memory, formal Tool contract + registry, single Reasoning Service entry point, Experience log, Step/Skill abstraction.
+See git history of this file for full details (commits `e4720c2`, `57f3dd1`, `c299fbf`, `d9a8599`). Summary: pooled DB, sandboxed code execution, allowlisted file access, unified routing, upserted memory, formal Tool contract + registry, single Reasoning Service entry point, Experience log, Step/Skill abstraction with real `Script`/`Validation`/`Metrics` (`ScriptMeta`, `Step.validate()`, `step_metrics` table), `generate_strict()` fix applied to the code-gen/web-query paths.
 
-## Resolved — E0 (carried over from C/D) — not yet committed
+## Resolved — E1: the Planner (not yet committed)
 
-`execute_plugin`'s code-gen path and web query-extraction now use `generate_strict()` instead of `generate()`. Verified live with Ollama down: code-gen returns `"Could not generate code: ..."` instead of feeding the failure string into the sandbox; web search falls back to the raw prompt instead of searching for the literal error text.
+Prudhvi asked for the architecture built "however you think is perfect" — this is the natural next piece now that 3 structurally distinct Skills exist (satisfying Phase E's own stated precondition).
 
-## In progress — preparing for E1 — not yet committed
+1. **`services/planning_service.py`** — `plan(prompt, project_id) -> Plan`. The core design point, and what makes this a genuine improvement over the old `ai_decide_plugin()`: the LLM decision prompt is built **dynamically from `ToolRegistry.describe_all()` + `SkillRegistry.describe_all()`**, not a hardcoded 3-option string. Adding a 4th Tool or Skill makes it selectable automatically — nothing in `planning_service.py` needs to change. This is literally what `ROADMAP.md`'s E1 meant by "based on a capability registry, not keyword matching."
+2. **Graceful degradation chain**: registry-driven LLM decision → (if Ollama down) the old rule-based `decide_plugin()` as an offline fallback, Tool-only → (if that also finds nothing) raw reasoning. Verified live: with Ollama down, `9*9` still hit the free rule-based math path (no LLM call at all), and `"hello how are you"` correctly fell through the whole chain to `reasoning` with `source: "fallback"`.
+3. **Model selection split out from capability selection**, correcting a real inconsistency from Phase B: `ARCHITECTURE.md` assigns "Model selection" to the *Reasoning* Service, not Planning, but Phase B's `routing.route()` bundled both into one call. `services/routing.py` now does model selection only (`select_model()`); `planning_service.py` does capability selection only. Two independent decisions, not one blurred one — `main.py` calls both explicitly.
+4. **`services/extraction.py`** — pulled the query/filename/code-generation extraction logic out of `plugin_manager.py` into shared helpers, since the Planner needs the exact same extraction for building Skill input that `execute_plugin()` already did for Tool input. No prompt duplicated across two files.
+5. **`main.py` rewritten** to call `plan()` then `execute_plan()` instead of the old `routing.route()` + `execute_plugin()` pair. `request_id` is now fetched at the top of the handler (via structlog contextvars) instead of after response generation, so it can be threaded into `Skill.run()` for step-metrics logging.
 
-`ROADMAP.md`'s Phase E header requires "enough Skills/Steps that a linear if/else chain genuinely can't route between them anymore" before building a Planner. That wasn't true with only `ResearchTopicSkill` existing (Phase D's single proof-of-concept, unwired). Prudhvi chose to build more Skills first rather than build the Planner against one example. Two more Skills now exist:
+**A second real bug was found and fixed while verifying this**, not introduced by E1 but exposed by re-reading old E0-era `experiences` rows: the *old* success-detection heuristic in `main.py` didn't include `"Could not generate code"` as a failure prefix (that message didn't exist yet when the heuristic was first written), so an E0 test got logged as `success: true` despite genuinely failing. Fixed in the new `main.py`'s heuristic, which now also includes `"Couldn't complete this"` (the new Skill-failure message format).
 
-1. **`FileDigestSkill`** (`services/skills/file_digest_skill.py`) — `filename` → read file (Tool) → summarize (reasoning) → save to memory (Tool). **Reuses the exact same `SummarizeStep` and `SaveMemoryStep` classes as `ResearchTopicSkill`** — only the predecessor step and the context keys passed in differ. No new "explain a file" implementation was written.
-2. **`CalculateAndExplainSkill`** (`services/skills/calculate_and_explain_skill.py`) — `code` → run it (Tool) → explain the result (reasoning). Deliberately a different shape: 2 steps not 3, doesn't touch memory at all. Also reuses `SummarizeStep`.
+**A connector outage happened mid-verification** (Desktop Commander stalled on 3 consecutive calls, including a trivial `get_config`). One edit (a missing `plan_decided` log line for the rule-based math path) was confirmed NOT to have landed by re-reading the file after reconnecting, rather than assumed either way — then reapplied and re-verified from a clean server restart.
 
-**A real design gap was found and fixed while building these**, not just two more clean Skills: `SummarizeStep` and `SaveMemoryStep` originally hardcoded which context key they read from (`"web_search"`, `"summarize"`) — meaning they looked reusable but weren't actually reusable by a second Skill without duplicating them. Fixed by making both take a configurable `source_key` (and `SaveMemoryStep`, a configurable `memory_key`) via their constructors. `ResearchTopicSkill` was updated to pass these explicitly (`source_key="web_search"`, etc.) rather than relying on the old implicit defaults, so the reuse is visible in the code, not hidden behind default-parameter coincidence.
-
-Two new deterministic Steps were also added to support this: `ReadFileStep` (wraps the `file` Tool) and `RunCodeStep` (wraps the `code` Tool) — both trivial wrappers, same pattern as `WebSearchStep`.
-
-Added `services/skills/registry.py` (`SkillRegistry`, mirroring `ToolRegistry`) — **not** the Planner itself, just makes "what Skills exist" queryable the way Tools already are. `registry.describe_all()` returns all 3 Skills with their step sequences.
-
-**Verified live** (Ollama still down throughout, same as every prior verification this session):
-- All 3 Skills registered and correctly described via `SkillRegistry.describe_all()`
-- `CalculateAndExplainSkill`: `RunCodeStep` correctly computed `sum(range(1,101)) = 5050` deterministically; `SummarizeStep` (reused, different `source_key`) correctly fail-gated with Ollama down
-- `FileDigestSkill`: legitimate file reads work; **Phase A's path-traversal protection still holds** through this new Skill (`../../../etc/passwd` correctly blocked at the `read_file` step)
-- No test data reached the real `memory` table in any failed run — confirmed via direct DB query (still exactly 3 original rows)
-
-## E1 status: still gated, now on a real decision
-
-3 Skills with genuinely different shapes (3-step w/ memory, 3-step w/ memory but different source, 2-step w/o memory) now exist. This is a reasonable amount of variety for a Planner to discriminate between — Prudhvi should decide whether this is "enough" or whether to build further before starting E1.
+**Verified live, full clean run after reconnecting, Ollama still down throughout**:
+- `9*9` → rule-based math path, `plan_decided` logged correctly, `experiences` row shows `tool: code, tool_source: rule, success: 1`
+- `"hello how are you"` → falls through the full chain to reasoning, `experiences` row shows `tool: null, tool_source: fallback, success: 0` (honestly reflecting Ollama being down)
+- Existing project data (`GET /projects`) still reads correctly through the new `main.py`
+- DB confirmed clean before and after: 3 memory rows, 25 chats, throughout
 
 ## What's already right — keep these
 
-- **Configurable Step constructors (`source_key`, `memory_key`)** — this is the actual mechanism that makes Step reuse real rather than aspirational. Any new Step should default to this pattern.
-- **`services/skills/registry.py`** — correct minimal scaffolding for E1; resist the urge to add selection logic here, that's the Planner's job specifically.
-- **3 genuinely distinct Skill shapes** — better Planner-design input than 3 skills that all happen to look the same.
+- **Registry-driven decision prompt** — this is the actual architectural upgrade E1 was supposed to deliver. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
+- **Model selection vs. capability selection as two separate calls** — matches `ARCHITECTURE.md`'s actual service boundaries. Don't re-merge them for convenience.
+- **Graceful multi-layer fallback (LLM → rule → reasoning)** — the system stays usable with the model provider fully down, proven repeatedly this session since Ollama was never once available.
+
+## Known gaps, unchanged from before
+
+- `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) the way `Step` now has via `ScriptMeta`. Not urgent until governance (Phase F+) needs it.
+- The Planner's LLM decision path itself has never been tested against a live Ollama response this entire session — only its fallback chain has real end-to-end verification. `_parse_decision()` and `_build_decision_prompt()` were unit-tested directly (proven correct against simulated inputs), but the full "ask Ollama, get back `skill:research_topic`, execute it" path is unverified against a real model. **Worth running once Ollama is available**, before trusting this in daily use.
 
 ## Immediate next action
 
-Review and commit the E0 fix + new Skills, then decide on E1 (build the Planner now, or keep expanding the Skill set first).
+Review and commit. Run one real end-to-end test with Ollama actually up, to close the one remaining unverified path (the live LLM decision, not just its fallback). Then decide: E2/E3 next, or expand the Skill/Tool set further first.

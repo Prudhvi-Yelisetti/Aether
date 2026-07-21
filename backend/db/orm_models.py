@@ -53,3 +53,27 @@ class Experience(Base):
     success = Column(Boolean, default=True)
     latency_ms = Column(Float)
     timestamp = Column(DateTime, server_default=func.now())
+
+
+class StepMetric(Base):
+    """The "Metrics" quarter of ARCHITECTURE.md's Step Service definition
+    (Execution contract / Script / Validation / Metrics — see
+    services/steps/base.py for the other three). One row per Step
+    invocation inside a Skill run: which step, which skill, whether it
+    succeeded, whether it passed its own validate(), how long it took.
+    Distinct from `experiences` (Phase C), which logs at the whole-request
+    level — this is per-Step, the finer grain a future Evolution/Cost
+    Engine service would need to answer "which specific step in a Skill is
+    slow or unreliable," not just "did the overall request succeed.\""""
+    __tablename__ = "step_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    step_name = Column(String, nullable=False)
+    step_version = Column(String, nullable=True)  # from ScriptMeta at call time
+    skill_name = Column(String, nullable=True)
+    request_id = Column(String, nullable=True)
+    success = Column(Boolean, default=True)
+    valid = Column(Boolean, default=True)  # result of Step.validate()
+    validation_reason = Column(String, nullable=True)
+    latency_ms = Column(Float)
+    timestamp = Column(DateTime, server_default=func.now())

@@ -19,7 +19,7 @@ See `STATUS.md` for verification details on each item.
 
 Makes the codebase coherent before it grows further.
 
-- [x] B1. Unify `router.py` and `plugin_manager.py` into a single routing decision returning `{model, tool_or_none}` — done via new `services/routing.py`; verified live that a rule-matched tool request skips the LLM decision call entirely (`tool_source: "rule"` in logs)
+- [x] B1. Unify `router.py` and `plugin_manager.py` into a single routing decision returning `{model, tool_or_none}` — done via new `services/routing.py`; verified live that a rule-matched tool request skips the LLM decision call entirely (`tool_source: "rule"` in logs). **Superseded in E1** — see below.
 - [x] B2. Replace string-matching memory extraction (`extract_memory` in `main.py`) with an LLM-based extraction step — done via new `services/memory_extraction.py`
 - [x] B3. Add upsert semantics to memory — one row per (project, key), updated not appended — done via a unique constraint (Alembic migration `f33fab44be66`) + `INSERT ... ON CONFLICT DO UPDATE`; verified two saves of the same key produce one row, not two
 - [x] B4. Replace bare `except:` with typed exceptions and proper error responses — already covered by Phase A's structlog changes in the files this phase touched; nothing left bare
@@ -43,9 +43,9 @@ See `STATUS.md` for verification details on each item.
 
 Only start once Phase C is stable and the Experience log has real data in it.
 
-- [x] D1. Define a Step: a reusable execution procedure with a contract, script, and validation — done via `services/steps/base.py`; unlike a Tool, a Step may call the Reasoning Service (documented explicitly as the exception to "tools never reason")
-- [x] D2. Define a Skill: a named sequence of Steps sharing context — done via `services/skills/base.py`; `Skill.run()` stops at the first failed Step rather than continuing with a broken context
-- [x] D3. Compose the existing 3 tools into at least one real multi-step Skill — done via `ResearchTopicSkill` (web search → summarize → save to memory), deliberately not wired into the live `/chat` path (that's Phase E's Planner's job)
+- [x] D1. Define a Step: a reusable execution procedure with a contract, script, and validation — **initially only the execution contract was actually built**; Script, Validation, and Metrics were retroactively added after Prudhvi asked directly whether Skills were properly split into scripts and steps per the architecture doc. See `STATUS.md`'s "closing the Step contract gap" entry for the full story. Now genuinely done: `ScriptMeta` (versioned identity, not executable data), `Step.validate()` (distinct from success, proven with `RunCodeStep`'s "ran but produced no output" case), and the `step_metrics` table (success rate vs. validation-pass rate tracked separately).
+- [x] D2. Define a Skill: a named sequence of Steps sharing context — done via `services/skills/base.py`; `Skill.run()` now gates on each Step's `validate()`, not just `result.success`
+- [x] D3. Compose the existing 3 tools into at least one real multi-step Skill — done via `ResearchTopicSkill` (web search → summarize → save to memory), plus `FileDigestSkill` and `CalculateAndExplainSkill` added since — 3 Skills with genuinely different shapes, all wired live via the Planner as of E1.
 
 **A real bug was found and fixed during this phase**, not just a clean build: `SummarizeStep` initially treated an Ollama-down failure as success (because `reasoning_service.generate()` returns a friendly string rather than raising, which is correct for chat UX but wrong for a Step checking success programmatically) — it nearly saved `"Could not reach Ollama..."` into memory as a real research summary. Fixed by adding `reasoning_service.generate_strict()`, which raises on the same failures. See `STATUS.md` for the full story — this distinction (`generate()` for humans, `generate_strict()` for automated callers) matters for every Step/Workflow/Evolution-check going forward.
 
@@ -53,20 +53,16 @@ See `STATUS.md` for verification details on each item.
 
 ## Phase E — Planning, Validation, Decision
 
-Only start once there are enough Skills/Steps that a linear if/else chain in `main.py` genuinely can't route between them anymore.
-
 - [x] E0. (carried over from Phase C/D) Apply the `generate_strict()` fix to `execute_plugin`'s code-gen path in `plugin_manager.py` — done; verified live with Ollama down: code-gen path now returns "Could not generate code: ..." instead of feeding the failure string into the sandbox as Python; web query-extraction now falls back to the raw prompt instead of searching for the literal error text
-- [ ] E1. Introduce a minimal Planner that chooses between Tool / Skill / raw reasoning based on a capability registry, not keyword matching — **gated: see note below**
-- [ ] E2. Add a Validator step between generation and delivery (start with deterministic checks — tests/lint — before adding LLM-based validation)
+- [x] E1. Introduce a minimal Planner that chooses between Tool / Skill / raw reasoning based on a capability registry, not keyword matching — done via `services/planning_service.py`. The decision prompt is built dynamically from `ToolRegistry.describe_all()` + `SkillRegistry.describe_all()`, not hardcoded — the actual point of "capability registry, not keyword matching." Model selection was also split out of `routing.py` into its own concern (`select_model()`), correcting a Phase B inconsistency where it was bundled with tool selection despite `ARCHITECTURE.md` assigning model selection to the Reasoning Service. Wired live into `main.py`, replacing `routing.route()` + `execute_plugin()`. **One gap remains**: the LLM decision path itself hasn't been tested against a live Ollama response — only its offline fallback chain has full live verification (Ollama was down for the entire session). Run one real test with Ollama up before trusting this in daily use.
+- [ ] E2. Add a Validator step between generation and delivery (start with deterministic checks — tests/lint — before adding LLM-based validation) — note: per-Step validation now exists (`Step.validate()`); E2 is about validating a Skill/request's *final* output before delivery, a different layer
 - [ ] E3. Add a Decision step: deliver / retry / escalate, instead of always delivering
-
-**Note on E1 (July 20, 2026):** this phase's own header condition — "only start once there are enough Skills/Steps that a linear if/else chain genuinely can't route between them anymore" — isn't actually met yet. Phase D produced exactly one Skill (`ResearchTopicSkill`), unwired, as a proof of concept. Building a Planner now would mean designing capability-selection logic against a registry with one real entry, which risks over-fitting the Planner's shape to a single example rather than a genuine variety of capabilities. Before E1: either build 2-3 more real Skills first (so the Planner has something to actually discriminate between), or treat E1 as scaffolding-only for now and revisit once there's real variety. This is a product decision, not a technical one — flagged for Prudhvi rather than decided autonomously.
 
 ## Phase F+ — Governance, Evolution, Distillation, Intent Bus, Cost Engine
 
 Deliberately not broken into tasks yet. These require:
-- Versioned, immutable objects to govern (retrofit is expensive — see `ARCHITECTURE.md`)
-- A real Experience log with enough volume to learn from
+- Versioned, immutable objects to govern (retrofit is expensive — see `ARCHITECTURE.md`) — **partially addressed for Steps** via `ScriptMeta`; Tools and Skills still lack this, see `STATUS.md`'s "known gaps"
+- A real Experience log with enough volume to learn from — `experiences` (request-level) and `step_metrics` (step-level) both exist now, still low volume
 - A settled Intent Bus topology (ordering, delivery guarantees, backpressure) decided before any service depends on it
 
 Revisit this phase only after Phase E is running in daily use.

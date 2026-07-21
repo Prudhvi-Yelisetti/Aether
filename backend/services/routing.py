@@ -1,60 +1,51 @@
 """
-Unified routing: one function decides both the model AND whether a tool is
-needed, instead of the previous two disconnected systems (router.py's
-route_model() feeding the final response, and plugin_manager.py's
-ai_decide_plugin() feeding tool selection with no knowledge of the model
-choice).
+Model selection only.
 
-Also fixes a real cost bug: ai_decide_plugin() is an LLM call, and previously
-ran on *every* request regardless of mode. decide_plugin() (free, rule-based)
-already covers the common tool-trigger phrases ("run python", "search",
-"read x.txt", "calculate") — this module tries that first and only falls
-back to the LLM-based decision when the rules don't match anything, cutting
-the extra Ollama round-trip for most tool-using requests.
+Phase B's routing.py originally bundled model selection AND tool decision
+into one route() call. That tool-decision half is now superseded by
+services/planning_service.py (Phase E1), which makes a strictly better
+decision — grounded in the live Tool/Skill registries rather than a
+hardcoded 3-way choice, and able to select a Skill, not just a bare Tool.
+
+What's left here is just model selection, which — per ARCHITECTURE.md —
+belongs to the Reasoning Service's responsibilities, not Planning's
+("Reasoning Service: Model selection, Prompt construction..."). It stays
+in its own small function rather than moving into reasoning_service.py
+outright; that consolidation is a reasonable future cleanup, not required
+for E1 to be correct.
 """
 
-from dataclasses import dataclass
-from typing import Optional
-
 from services.logging_config import get_logger
-from services.router import route_model
-from services.plugin_manager import decide_plugin, ai_decide_plugin
 
 logger = get_logger("aether.routing")
 
 
-@dataclass
-class RoutingDecision:
-    model: str
-    tool: Optional[str]
-    tool_source: str  # "rule" | "llm" | "none" — for observability
+def route_model(prompt: str) -> str:
+    prompt_lower = prompt.lower()
+
+    # coding → strong model
+    if any(word in prompt_lower for word in ["code", "program", "c++", "python", "java"]):
+        return "llama3"
+
+    # complex explanation → strong model
+    elif any(word in prompt_lower for word in ["explain", "detail", "theory", "how", "why"]):
+        return "llama3"
+
+    # long input → strong model
+    elif len(prompt) > 300:
+        return "llama3"
+
+    # simple chat → fast model
+    elif len(prompt) < 50:
+        return "mistral"
+
+    # default
+    return "mistral"
 
 
-def route(prompt: str, mode: str = "smart") -> RoutingDecision:
-    # -------- Model selection (unchanged logic, just centralized here) --------
+def select_model(prompt: str, mode: str) -> str:
     if mode == "fast":
-        model = "mistral"
-    elif mode == "powerful":
-        model = "llama3"
-    else:
-        model = route_model(prompt)
-
-    # -------- Tool selection: free rules first, LLM fallback only if needed --------
-    tool = decide_plugin(prompt)
-    tool_source = "rule" if tool else "none"
-
-    if tool is None:
-        tool = ai_decide_plugin(prompt)
-        tool_source = "llm" if tool else "none"
-
-    decision = RoutingDecision(model=model, tool=tool, tool_source=tool_source)
-
-    logger.info(
-        "routing_decision",
-        mode=mode,
-        model=model,
-        tool=tool,
-        tool_source=tool_source,
-    )
-
-    return decision
+        return "mistral"
+    if mode == "powerful":
+        return "llama3"
+    return route_model(prompt)
