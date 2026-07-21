@@ -2,13 +2,15 @@
 
 _Last updated: July 21, 2026, after completing Phase A–D, E0, closing the Step contract's Script/Validation/Metrics gap, and building E1 (the Planner). Update this file whenever a Critical/Important item is resolved or a new one is found._
 
+**Continuing in a new session? Read `HANDOFF.md` first — it's the compact version of everything below.**
+
 ## Snapshot
 
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
 | Current state | **Phase A + B + C + D complete. E0 + E1 complete.** A real registry-driven Planner now decides Tool vs. Skill vs. reasoning for every `/chat` request. |
-| Commits | Phase A (`e4720c2`), B (`57f3dd1`), C (`c299fbf`), D (`d9a8599`) committed and pushed. Everything since (Step contract gap fix + E1) not yet committed. |
+| Commits | Everything through E1 committed and pushed (`eb874c7`, up to date with `origin/main`, working tree clean). |
 | Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run this session |
 | Critical blockers | 0 |
 | Next phase | E2 (Validator) / E3 (Decision), or expand the Skill set further first — Prudhvi's call |
@@ -25,7 +27,7 @@ Apply new migrations after pulling: `.venv/bin/alembic upgrade head`.
 
 See git history of this file for full details (commits `e4720c2`, `57f3dd1`, `c299fbf`, `d9a8599`). Summary: pooled DB, sandboxed code execution, allowlisted file access, unified routing, upserted memory, formal Tool contract + registry, single Reasoning Service entry point, Experience log, Step/Skill abstraction with real `Script`/`Validation`/`Metrics` (`ScriptMeta`, `Step.validate()`, `step_metrics` table), `generate_strict()` fix applied to the code-gen/web-query paths.
 
-## Resolved — E1: the Planner (not yet committed)
+## Resolved — E1: the Planner (committed as `eb874c7`)
 
 Prudhvi asked for the architecture built "however you think is perfect" — this is the natural next piece now that 3 structurally distinct Skills exist (satisfying Phase E's own stated precondition).
 
@@ -58,4 +60,4 @@ Prudhvi asked for the architecture built "however you think is perfect" — this
 
 ## Immediate next action
 
-Review and commit. Run one real end-to-end test with Ollama actually up, to close the one remaining unverified path (the live LLM decision, not just its fallback). Then decide: E2/E3 next, or expand the Skill/Tool set further first.
+Run one real end-to-end test with Ollama actually up, to close the one remaining unverified path (the live LLM decision, not just its fallback). Then decide: E2/E3 next, or expand the Skill/Tool set further first. See `HANDOFF.md` for the full session-transition brief.
