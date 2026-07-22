@@ -5,10 +5,19 @@ from services.logging_config import get_logger
 logger = get_logger("aether.ollama")
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+# Live 2026-07-22: the 45s-150s+ latency variance chased on 2026-07-21
+# was NOT reload cost or hardware limits — it was qwen3.5:9b's hybrid
+# "thinking" mode running unbounded on every call because the API's
+# `think` field was never set. Proven directly: identical decision
+# prompt, identical correct output ("none") — 30.9s with `think` unset
+# (369-char hidden reasoning trace) vs 0.8s with think=False explicit.
+# Thinking is now off by default; REQUEST_TIMEOUT_SECONDS restored to a
+# sane value since the real problem is fixed, not papered over with a
+# bigger number. See STATUS.md for the full A/B test.
 REQUEST_TIMEOUT_SECONDS = 60
 
 
-def generate_response(prompt: str, model: str = "llama3", history=None, memory=None):
+def generate_response(prompt: str, model: str = "qwen3.5:9b", history=None, memory=None, think: bool = False):
     full_prompt = ""
 
     # -------- SYSTEM INSTRUCTIONS --------
@@ -50,7 +59,8 @@ def generate_response(prompt: str, model: str = "llama3", history=None, memory=N
             json={
                 "model": model,
                 "prompt": full_prompt,
-                "stream": False
+                "stream": False,
+                "think": think,
             },
             timeout=REQUEST_TIMEOUT_SECONDS,
         )

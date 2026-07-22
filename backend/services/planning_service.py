@@ -121,7 +121,12 @@ def plan(prompt: str, project_id: str | None = None) -> Plan:
         return Plan(capability_type="tool", capability_name="code", source="rule")
 
     try:
-        raw = generate_strict(_build_decision_prompt(prompt), model="mistral")
+        # qwen3.5:9b: fast, has "tools" capability, matches routing.py's
+        # FAST_MODEL — was hardcoded "mistral" (not an installed model,
+        # verified live 2026-07-21), which meant this call always raised
+        # ReasoningError and silently took the fallback path below, even
+        # with Ollama running. See STATUS.md.
+        raw = generate_strict(_build_decision_prompt(prompt), model="qwen3.5:9b")
         capability_type, capability_name = _parse_decision(raw)
     except ReasoningError:
         # Ollama down: degrade to the offline rule-based tool decision

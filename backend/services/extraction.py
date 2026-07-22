@@ -30,7 +30,7 @@ Return ONLY the search query.
 Request: {prompt}
 """
     try:
-        return generate_strict(query_prompt, model="mistral").strip()
+        return generate_strict(query_prompt, model="qwen3.5:9b").strip()
     except ReasoningError:
         return prompt
 
@@ -53,4 +53,4 @@ Rules:
 
 Request: {prompt}
 """
-    return generate_strict(code_prompt, model="llama3")
+    return generate_strict(code_prompt, model="qwen3-coder:latest")

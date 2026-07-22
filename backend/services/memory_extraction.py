@@ -41,7 +41,7 @@ def extract_memory_facts(prompt: str) -> dict:
     try:
         raw = generate(
             EXTRACTION_PROMPT.format(prompt=prompt),
-            model="mistral",
+            model="qwen3.5:9b",
         )
         # Models sometimes wrap JSON in prose or code fences; grab the
         # {...} span rather than requiring an exact-match response.

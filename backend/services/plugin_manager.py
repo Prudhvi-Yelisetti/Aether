@@ -93,7 +93,7 @@ Rules:
 Request: {prompt}
 """
 
-    decision = generate(decision_prompt, model="mistral").strip().lower()
+    decision = generate(decision_prompt, model="qwen3.5:9b").strip().lower()
 
     if "code" in decision:
         return "code"
@@ -152,7 +152,7 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
 
         summary = generate(
             f"Summarize this file content clearly:\n{result.output}",
-            model="mistral"
+            model="qwen3.5:9b"
         )
         return summary
 
@@ -166,7 +166,7 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
 
         summary = generate(
             f"Explain this simply:\n{result.output}",
-            model="mistral"
+            model="qwen3.5:9b"
         )
         return summary
 

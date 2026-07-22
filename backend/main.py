@@ -10,6 +10,7 @@ from services.logging_config import configure_logging, get_logger
 from services.reasoning_service import generate
 from services.routing import select_model
 from services.planning_service import plan, execute_plan
+from services.validation_service import validate_response
 from storage.project_store import (
     create_project,
     get_projects,
@@ -160,14 +161,25 @@ def chat(request: ChatRequest):
         response = execute_plan(the_plan, prompt, request_id=request_id)
     latency_ms = round((time.monotonic() - start) * 1000, 1)
 
+    # -------- Validation (Phase E2 — see validation_service.py) --------
+    # Deterministic check: does this look like an internal failure string
+    # rather than real content? Catches a real, live-observed bug (see
+    # STATUS.md): a raw Ollama timeout string was previously delivered to
+    # the user as if it were a normal chat answer, HTTP 200 and all.
+    validation = validate_response(response)
+    if not validation.valid:
+        logger.warning(
+            "response_validation_failed",
+            reason=validation.reason,
+            capability_type=the_plan.capability_type,
+            capability_name=the_plan.capability_name,
+        )
+        response = (
+            "Something went wrong generating a response — please try again. "
+            f"(reason: {validation.reason})"
+        )
+
     # -------- Experience Log (see ARCHITECTURE.md's Experience Service) --------
-    success = not (response or "").startswith((
-        "Error", "Execution timed out", "Execution blocked",
-        "Access denied", "File not found", "Not a file",
-        "Search failed", "No useful results", "Could not reach Ollama",
-        "Request to", "Request failed", "Could not generate code",
-        "Couldn't complete this",
-    ))
     log_experience(
         project_id=project_id,
         request_id=request_id,
@@ -175,7 +187,7 @@ def chat(request: ChatRequest):
         tool=the_plan.capability_name,
         tool_source=the_plan.source,
         model=model,
-        success=success,
+        success=validation.valid,
         latency_ms=latency_ms,
     )
 

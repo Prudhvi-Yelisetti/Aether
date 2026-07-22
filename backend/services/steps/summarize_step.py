@@ -46,7 +46,7 @@ class SummarizeStep(Step):
             return StepResult(success=False, error=f"context['{self.source_key}'] is required")
 
         try:
-            summary = generate_strict(f"Explain this simply:\n{raw_text}", model="mistral")
+            summary = generate_strict(f"Explain this simply:\n{raw_text}", model="qwen3.5:9b")
             return StepResult(success=True, output=summary)
         except ReasoningError as e:
             return StepResult(success=False, error=str(e))

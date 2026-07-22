@@ -20,32 +20,40 @@ from services.logging_config import get_logger
 logger = get_logger("aether.routing")
 
 
+# Live 2026-07-21: hardcoded "llama3"/"mistral" never existed on this
+# machine's Ollama install (only qwen3.5:9b and qwen3-coder:latest are
+# pulled) — verified this was silently broken for every non-math request
+# even with Ollama running, not just while it was down. See STATUS.md.
+STRONG_MODEL = "qwen3-coder:latest"
+FAST_MODEL = "qwen3.5:9b"
+
+
 def route_model(prompt: str) -> str:
     prompt_lower = prompt.lower()
 
     # coding → strong model
     if any(word in prompt_lower for word in ["code", "program", "c++", "python", "java"]):
-        return "llama3"
+        return STRONG_MODEL
 
     # complex explanation → strong model
     elif any(word in prompt_lower for word in ["explain", "detail", "theory", "how", "why"]):
-        return "llama3"
+        return STRONG_MODEL
 
     # long input → strong model
     elif len(prompt) > 300:
-        return "llama3"
+        return STRONG_MODEL
 
     # simple chat → fast model
     elif len(prompt) < 50:
-        return "mistral"
+        return FAST_MODEL
 
     # default
-    return "mistral"
+    return FAST_MODEL
 
 
 def select_model(prompt: str, mode: str) -> str:
     if mode == "fast":
-        return "mistral"
+        return FAST_MODEL
     if mode == "powerful":
-        return "llama3"
+        return STRONG_MODEL
     return route_model(prompt)

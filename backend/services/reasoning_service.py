@@ -10,6 +10,7 @@ module, not every call site.
 """
 
 from services.ollama_service import generate_response as _ollama_generate
+from services.validation_service import REASONING_FAILURE_PREFIXES as FAILURE_PREFIXES
 
 # ollama_service.py deliberately never raises for expected failure modes
 # (unreachable, timeout, bad response) — it returns a human-readable string
@@ -20,12 +21,10 @@ from services.ollama_service import generate_response as _ollama_generate
 # "Could not reach Ollama" string got treated as a valid summary and nearly
 # got saved to memory as one. generate_strict() below exists for exactly
 # those callers.
-_FAILURE_PREFIXES = (
-    "Could not reach Ollama",
-    "Request to",  # "Request to {model} timed out after ..."
-    "Request failed:",
-    "Error from",  # "Error from {model}: {data}"
-)
+#
+# FAILURE_PREFIXES lives in validation_service.py now, not here — it's the
+# same list E2's Validator uses to catch this exact failure class before
+# delivery. One source of truth instead of two copies that can drift.
 
 
 class ReasoningError(Exception):
@@ -33,10 +32,10 @@ class ReasoningError(Exception):
 
 
 def _is_failure_message(text: str) -> bool:
-    return isinstance(text, str) and text.startswith(_FAILURE_PREFIXES)
+    return isinstance(text, str) and text.startswith(FAILURE_PREFIXES)
 
 
-def generate(prompt: str, model: str = "llama3", history=None, memory=None) -> str:
+def generate(prompt: str, model: str = "qwen3.5:9b", history=None, memory=None) -> str:
     """Graceful variant — returns a human-readable string even on failure.
     Use this for anything a user will read directly (chat responses)."""
     # Provider selection would branch here once a second provider exists —
@@ -44,7 +43,7 @@ def generate(prompt: str, model: str = "llama3", history=None, memory=None) -> s
     return _ollama_generate(prompt, model=model, history=history, memory=memory)
 
 
-def generate_strict(prompt: str, model: str = "llama3", history=None, memory=None) -> str:
+def generate_strict(prompt: str, model: str = "qwen3.5:9b", history=None, memory=None) -> str:
     """Strict variant — raises ReasoningError on failure instead of
     returning a friendly string. Use this for automated callers (Steps,
     pipelines) that check success programmatically rather than displaying
