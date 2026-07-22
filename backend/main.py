@@ -10,7 +10,7 @@ from services.logging_config import configure_logging, get_logger
 from services.reasoning_service import generate
 from services.routing import select_model
 from services.planning_service import plan, execute_plan
-from services.validation_service import validate_response
+from services.decision_service import decide
 from storage.project_store import (
     create_project,
     get_projects,
@@ -153,31 +153,21 @@ def chat(request: ChatRequest):
     # -------- Planning (Tool / Skill / raw reasoning — see planning_service.py) --------
     the_plan = plan(prompt, project_id)
 
-    # -------- Generate Response --------
-    start = time.monotonic()
-    if the_plan.capability_type == "reasoning":
-        response = generate(prompt, model, history, memory)
-    else:
-        response = execute_plan(the_plan, prompt, request_id=request_id)
-    latency_ms = round((time.monotonic() - start) * 1000, 1)
+    # -------- Generate Response, with Validation + bounded Retry/Escalate --------
+    # Phase E2 (validation_service.py) + E3 (decision_service.py): decide()
+    # runs one attempt, validates it, retries once if the failure looks
+    # transient, and escalates to a clear, honest message instead of ever
+    # delivering an internal error string — the exact bug this closes is
+    # documented in validation_service.py's module docstring.
+    def _attempt() -> str:
+        if the_plan.capability_type == "reasoning":
+            return generate(prompt, model, history, memory)
+        return execute_plan(the_plan, prompt, request_id=request_id)
 
-    # -------- Validation (Phase E2 — see validation_service.py) --------
-    # Deterministic check: does this look like an internal failure string
-    # rather than real content? Catches a real, live-observed bug (see
-    # STATUS.md): a raw Ollama timeout string was previously delivered to
-    # the user as if it were a normal chat answer, HTTP 200 and all.
-    validation = validate_response(response)
-    if not validation.valid:
-        logger.warning(
-            "response_validation_failed",
-            reason=validation.reason,
-            capability_type=the_plan.capability_type,
-            capability_name=the_plan.capability_name,
-        )
-        response = (
-            "Something went wrong generating a response — please try again. "
-            f"(reason: {validation.reason})"
-        )
+    start = time.monotonic()
+    decision = decide(_attempt)
+    latency_ms = round((time.monotonic() - start) * 1000, 1)
+    response = decision.response
 
     # -------- Experience Log (see ARCHITECTURE.md's Experience Service) --------
     log_experience(
@@ -187,7 +177,7 @@ def chat(request: ChatRequest):
         tool=the_plan.capability_name,
         tool_source=the_plan.source,
         model=model,
-        success=validation.valid,
+        success=decision.valid,
         latency_ms=latency_ms,
     )
 

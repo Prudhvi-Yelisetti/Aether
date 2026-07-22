@@ -1,6 +1,6 @@
 # Aether — Current Status
 
-_Last updated: July 22, 2026, after settling E1's live-LLM latency variance (root cause: unset `think` mode, not timeout/hardware) and shipping E2's first deterministic Validator check, live-verified both the success and failure path. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 22, 2026, after settling E1's live-LLM latency variance, shipping E2's first deterministic Validator check, and shipping E3's bounded retry/escalate Decision step — all three live-verified. Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 **Continuing in a new session? Read `HANDOFF.md` first — it's the compact version of everything below.**
 
@@ -9,11 +9,11 @@ _Last updated: July 22, 2026, after settling E1's live-LLM latency variance (roo
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 started: first deterministic Validator check live and proven.** |
-| Commits | Everything through E1 committed and pushed (`eb874c7`). **Uncommitted**: model-name fix (7 files) + `think`-mode fix + timeout tuning + new `services/validation_service.py` + `main.py`/`reasoning_service.py` wiring for E2 — see below. |
-| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across both sessions |
+| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (first deterministic check) and E3 (bounded retry/escalate) both live and proven.** |
+| Commits | Model-name + `think`-mode + timeout + E2 committed as `ebf40a3`. Push to `origin/main` failed (no SSH access from this session) — push manually. **Uncommitted on top**: E3 (`services/decision_service.py`, `validation_service.py`'s retryable classification, `main.py`'s refactor to delegate to `decide()`). |
+| Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across all sessions |
 | Critical blockers | 0 |
-| Next phase | Rest of E2 (more deterministic checks, then LLM-based validation) / E3 (Decision), or expand the Skill set further — Prudhvi's call |
+| Next phase | Retry backoff (known gap) / rest of E2 (LLM-based validation) / expand the Skill set — Prudhvi's call |
 
 ## How to run it now
 
@@ -22,127 +22,87 @@ cd backend
 .venv/bin/uvicorn main:app --reload --port 8000
 ```
 Apply new migrations after pulling: `.venv/bin/alembic upgrade head`.
-Ollama must be running (`ollama serve`) with `qwen3.5:9b` and `qwen3-coder:latest` pulled — these are the only two models the codebase now references.
+Ollama must be running (`ollama serve`) with `qwen3.5:9b` and `qwen3-coder:latest` pulled — these are the only two models the codebase now references. **Note**: on this dev machine, both `ollama serve` and the backend process have died between every multi-hour gap in sessions (survived a shell/session recycle, not a reboot) — always re-check `curl localhost:11434/api/tags` and the backend's own `/` before assuming either is still up.
 
-## Resolved this session — the live-LLM path was untestable, not just untested
+## Session narrative — 2026-07-21/22, in order
 
-Ollama was down for the entire prior session, so E1's HANDOFF.md correctly flagged the live-LLM decision path as unverified. This session started Ollama up to close that gap — and found the real reason it had never been exercised was worse than "Ollama was down":
+### 1. Model-name bug (the real reason the live-LLM path was never tested)
 
-**Every LLM call site in the backend hardcoded `"llama3"` or `"mistral"` as the model name — neither is installed.** Only `qwen3.5:9b` and `qwen3-coder:latest` are pulled on this machine. So even with Ollama running, every live call failed instantly on `"model 'X' not found"`, which `planning_service.plan()`'s `generate_strict()` catches as a `ReasoningError` and silently routes to the offline fallback — indistinguishable from Ollama being down at all. Proven live: first test request returned `"Error from mistral: {'error': \"model 'mistral' not found\"}"` verbatim as the chat response, and the `experiences` row logged `tool_source: fallback` with 1.7ms latency (instant failure, not a real attempt).
+The prior session correctly flagged "run one real test with Ollama up" as the top priority — Ollama had been down the entire session. Starting Ollama up revealed the real blocker was worse: **every LLM call site in the backend hardcoded `"llama3"` or `"mistral"` as the model name — neither is installed.** Only `qwen3.5:9b` and `qwen3-coder:latest` are pulled on this machine. So even with Ollama running, every live call failed instantly on `"model 'X' not found"`, caught by `generate_strict()` as a `ReasoningError`, silently routed to the offline fallback — indistinguishable from Ollama being down at all.
 
-**Fixed all 7 affected files** to use the two models actually installed (`qwen3.5:9b` for decisions/reasoning/extraction, `qwen3-coder:latest` for code generation): `routing.py`, `planning_service.py`, `plugin_manager.py` (3 call sites), `extraction.py` (2 call sites), `memory_extraction.py`, `services/steps/summarize_step.py`, plus the misleading `model="llama3"` defaults in `reasoning_service.py`/`ollama_service.py` (unreachable now that every caller passes an explicit model, but left as a landmine otherwise).
+Proven live: first test request returned `"Error from mistral: {'error': \"model 'mistral' not found\"}"` verbatim as the chat response; the `experiences` row logged `tool_source: fallback` at 1.7ms (instant failure, not a real attempt).
 
-**Not fixed, flagged for cleanup**: `services/router.py` is a dead, zero-caller duplicate of `routing.py`'s old logic, with the same broken model names. Recommend deleting it — didn't do so unilaterally since it's a file removal, not a bug fix.
+**Fixed across 7 files** to use the two models actually installed (`qwen3.5:9b` for decisions/reasoning/extraction, `qwen3-coder:latest` for code generation): `routing.py`, `planning_service.py`, `plugin_manager.py` (3 call sites), `extraction.py` (2 call sites), `memory_extraction.py`, `services/steps/summarize_step.py`, plus the misleading `model="llama3"` defaults in `reasoning_service.py`/`ollama_service.py`.
 
-### Live verification, with real DB evidence (`experiences` table, 4 consecutive test requests)
+**Not fixed, flagged for cleanup**: `services/router.py` is a dead, zero-caller duplicate of `routing.py`'s old logic, with the same broken model names. Recommend deleting — didn't do so unilaterally since it's a file removal, not a bug fix.
 
-| tool_source | success | latency_ms | what it shows |
-|---|---|---|---|
-| fallback | false | 1.7 | pre-fix baseline: instant "model not found" |
-| fallback | false | 60068 | post-fix, but hit a wedged Ollama instance (stale process) |
-| **llm** | false | 60062 | **decision call succeeded live** — the specific unverified claim, now proven |
-| fallback | false | 60063 | same request again, decision call itself timed out this time |
+### 2. Latency variance — root cause was `think` mode, not timeout or hardware
 
-The two `llm`/`fallback` results back-to-back on the identical request show the real finding: **the live-LLM decision path works, but was flaky against the original 60s timeout** — `qwen3.5:9b` (9.7B) on this machine's CPU measured 14s for a bare warm Ollama call, but the app's decision + reasoning calls (extra prompt overhead) were clocking 45–60s+ each, so two sequential LLM calls per request (decision, then answer generation) had a real chance of blowing a 60s-per-call budget. One test's user-facing response was literally `"Request to qwen3.5:9b timed out after 60s"`.
+After the model-name fix, decision-call latency for the identical prompt swung 45s–150s+ across repeated tests. First attempt at a fix (raise `REQUEST_TIMEOUT_SECONDS` 60→150) bought exactly one successful full response and didn't fix the underlying flakiness — the real signal that this was a symptom, not the cause.
 
-**Fix applied**: `REQUEST_TIMEOUT_SECONDS` in `ollama_service.py` raised from 60 to 150. **Re-verified live — result was genuinely mixed, and turned out to be a symptom, not the real fix (see below).**
-
-## Resolved 2026-07-22 — the real root cause was `think` mode, not timeout or reload cost
-
-The 150s timeout bump above bought exactly one successful full response and didn't fix the underlying flakiness (decision-call latency for the *same* prompt still ranged 45s–150s+ across repeated tests). That was the signal something structural was wrong, not just under-provisioned. Investigated properly instead of raising the number further:
-
-`qwen3.5:9b` is a hybrid **thinking** model (confirmed via `ollama list`: `"capabilities":[...,"thinking"]`), and `ollama_service.py`'s request payload never set the API's `think` field. Proved directly with a controlled A/B — identical decision prompt, identical correct output (`"none"`):
+Investigated properly: `qwen3.5:9b` is a hybrid **thinking** model (`ollama list` shows `"capabilities":[...,"thinking"]`), and the Ollama request payload never set the `think` field. Proved with a controlled A/B — identical decision prompt, identical correct output (`"none"`):
 
 | `think` | latency | hidden reasoning trace |
 |---|---|---|
-| unset (previous behavior) | 30.9s | 369 chars |
+| unset (previous default) | 30.9s | 369 chars |
 | `false` (explicit) | 0.8s | 0 chars |
 
-**37x speedup, same correctness.** The 45–150s+ variance chased the day before was the model running an unbounded internal reasoning trace on every call — including one-line yes/no classification prompts that need zero reasoning — with no way to predict how long that trace would run. Not reload cost, not hardware limits, not something a bigger timeout could actually fix (proven — 150s still weren't always enough).
+**37x speedup, same correctness.** The variance was the model running an unbounded internal reasoning trace on every call, including one-line classification prompts that need zero reasoning. Not reload cost, not hardware limits — proven, since 150s still wasn't always enough.
 
-**Fix**: `ollama_service.generate_response()` now takes a `think: bool = False` parameter and passes it through to Ollama's API explicitly, defaulting off everywhere (no caller currently opts in). `REQUEST_TIMEOUT_SECONDS` restored to 60 — no longer needs padding now that the real problem is gone. **Re-verified live, 3 consecutive identical requests, all successful and fast**:
+**Fix**: `ollama_service.generate_response()` now takes `think: bool = False`, passed explicitly to Ollama's API, defaulting off everywhere. `REQUEST_TIMEOUT_SECONDS` restored to 60. Re-verified live: 3 consecutive identical requests, all `tool_source: llm`, all `success: true`, 5.1–6.1s each. No more flakiness, no more fallback-on-timeout.
 
-| tool_source | success | latency_ms |
-|---|---|---|
-| llm | true | 5095 |
-| llm | true | 6121 |
-| llm | true | 5361 |
+**Worth deciding later, not urgent**: `think` is off everywhere now, including for real chat answers — the right default for latency, but means Aether never uses its reasoning capability even on hard questions. Consider an opt-in `think=True` for a future "powerful" mode if answer quality on hard questions ever becomes a concern — don't flip the default back without the same kind of live proof this fix required.
 
-No more flakiness, no more fallback-on-timeout, no more multi-minute waits. This closes both the original HANDOFF.md item (live-LLM decision path verified) and the latency-variance open question — with proof, not a bigger number papering over an unknown cause.
+### 3. E2 — first deterministic Validator check
 
-**Worth deciding later, not urgent**: thinking mode is now off everywhere, including the main reasoning `generate()` call for actual chat answers. That's the right default for latency, but means Aether never uses `qwen3.5:9b`'s reasoning capability even for genuinely hard questions. If answer quality on complex questions ever becomes a concern, consider making `think` an opt-in per-request flag (e.g. for `mode: "powerful"`) rather than a blanket off — but don't default it back on without the same kind of proof this fix required.
+`main.py` already computed a `success` flag from a hardcoded failure-string-prefix list for the experience log — but never used that knowledge to protect the `response` actually delivered to the user. The detection existed; nothing acted on it. The same list was also duplicated, slightly differently, in `reasoning_service.py` — the identical "one fact, N hardcoded copies" pattern that caused the model-name bug.
+
+Built `services/validation_service.py` as the single source of truth: `FAILURE_PREFIXES` (reasoning-layer + tool/skill-layer failure strings) and `validate_response()`. `reasoning_service.py` now imports the reasoning-only subset instead of keeping its own copy.
+
+A real bug in the first wiring attempt was caught live, not assumed clean: an import-rename left one stale reference in `reasoning_service.py`, surfacing as an HTTP 500 the moment it was tested. Fixed, modules re-verified to import cleanly, re-tested successfully.
+
+Verified live, both directions: normal request → passes validation unchanged; Ollama stopped mid-session → `generate()` returned `"Could not reach Ollama..."`, validator caught it, user received a clean message instead of the raw internal string.
+
+*(This endpoint wiring was later superseded by E3 below — `main.py` no longer calls `validate_response()` directly, it delegates to `decide()`, which calls validation internally.)*
+
+### 4. E3 — bounded retry + escalate, live-proven on all three paths
+
+Built directly on E2: `validate_response()` now also classifies each known failure as `retryable` or not — e.g. `"Could not reach Ollama"` is transient (worth a retry), `"File not found"` is permanent (retrying the identical call fails identically, don't bother). New `services/decision_service.py` owns the policy: run one attempt, validate, retry once if retryable, escalate to a clear honest message if still invalid after that. `main.py`'s `/chat` endpoint now delegates entirely to `decide()`.
+
+**Live-verified, all three paths, exact matching log + DB evidence**:
+
+| scenario | attempts | retryable | outcome |
+|---|---|---|---|
+| normal request, Ollama up | 1 | n/a | delivered normally, `tool_source: llm`, `success: true` — unchanged from before E3 |
+| request a nonexistent file | 1 | false | escalated immediately, no wasted retry (1.8s total), `decision_escalated` logged with `retryable: false` |
+| Ollama stopped for the whole request | 2 | true | one retry fired (`decision_retry`, `attempt_number: 2`), then escalated when the retry also failed (`decision_escalated`, `retryable: true, attempts: 2`) |
+
+**Known gap, honestly flagged**: retries fire with **zero backoff** — in the Ollama-down test, both attempts completed within milliseconds of each other. Fine for slowness (a retry gets a fresh timeout budget); useless for a genuinely-down-for-a-moment Ollama, since the retry hits the identical dead window. Didn't chase an artificial timing demo to "prove" recovery the current design can't actually deliver — worth adding a short delay (1–2s) before retrying if this matters in practice.
+
+**Scope boundary, explicit**: bounded retry + escalate only, matching the roadmap's own framing. No exponential backoff, no configurable retry count, no per-capability-type policy beyond what the failure-prefix taxonomy already encodes.
 
 ## What's already right — keep these
 
-- **Registry-driven decision prompt** — this is the actual architectural upgrade E1 was supposed to deliver. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
-- **Model selection vs. capability selection as two separate calls** — matches `ARCHITECTURE.md`'s actual service boundaries. Don't re-merge them for convenience.
-- **Graceful multi-layer fallback (LLM → rule → reasoning)** — this is exactly what made the model-name bug survive undetected for as long as it did: the system degrades so cleanly that a total live-LLM failure looks identical to a healthy offline fallback in the response text alone. The `experiences` table's `tool_source` column is the only reliable signal — check it, don't trust response text alone, when verifying live-LLM behavior specifically.
+- **Registry-driven decision prompt** (E1) — the actual architectural upgrade. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
+- **Model selection vs. capability selection as two separate calls** — matches `ARCHITECTURE.md`'s service boundaries. Don't re-merge them for convenience.
+- **Graceful multi-layer fallback (LLM → rule → reasoning)** — kept the system usable through Ollama being fully down for an entire prior session, and (double-edged, see below) is exactly what let the model-name bug go unnoticed for as long as it did.
+- **Validation and Decision as two separate concerns** (E2/E3) — `validate_response()` only classifies; `decide()` only acts on that classification. Don't collapse them for convenience the same way model/capability selection shouldn't be collapsed.
+- **`experiences.tool_source`** is the one reliable signal for "did the live LLM actually get used" — response text alone degrades too gracefully to tell. Check it, don't guess from the reply, whenever verifying live-LLM behavior specifically.
 
 ## Known gaps
 
-- Model name is currently a single hardcoded pair (`qwen3.5:9b` / `qwen3-coder:latest`) duplicated across 7 files rather than defined once. Worth centralizing into `routing.py`'s constants and importing everywhere, instead of each file choosing its own string — the exact bug just fixed was made possible by there being 7 places to get it wrong instead of one.
-- `services/router.py` — dead file, same bug, not deleted. Low urgency (zero callers) but a landmine if anyone ever imports it by mistake.
-- `think` is hardcoded off everywhere via a default parameter rather than being a considered per-request choice — fine for now, worth revisiting only if answer quality on hard questions becomes a real concern (see the `think`-mode writeup above).
+- Model name is a hardcoded pair (`qwen3.5:9b` / `qwen3-coder:latest`) duplicated across 7 files rather than defined once. Worth centralizing into `routing.py`'s constants and importing everywhere — the model-name bug was made possible by there being 7 places to get it wrong instead of one.
+- `services/router.py` — dead file, same model-name bug, not deleted. Zero callers, but a landmine if anyone ever imports it by mistake.
+- `think` hardcoded off everywhere via a default parameter. Fine for now; revisit only if answer quality on hard questions becomes a real concern, with the same live-proof discipline.
+- E3's retry has zero backoff between attempts — see the E3 writeup above.
 - `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) the way `Step` now has via `ScriptMeta`. Not urgent until governance (Phase F+) needs it.
 
 ## Immediate next action
 
-Commit the model-name + `think`-mode + timeout + E2-Validator fixes (all currently uncommitted). Then decide E2's next increment (empty-response check is trivial; LLM-based validation is a bigger, separate piece) vs moving to E3. See `HANDOFF.md` for the full session-transition brief.
+Push `ebf40a3` (needs SSH access this session doesn't have) and commit + push E3 on top. Then decide: add retry backoff, continue E2 with LLM-based validation, or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
-## Resolved 2026-07-22 — E2, first pass: deterministic Validator, live-proven both ways
+## Earlier phases (condensed — see git history for full detail)
 
-Scoped narrow deliberately (per ROADMAP.md: "start with deterministic checks... before adding LLM-based validation") and motivated by a real bug proven live earlier the same session, not speculative scope: a raw Ollama timeout string was delivered to the user as if it were a real answer.
+**Phases A–D, E0** (commits `e4720c2`, `57f3dd1`, `c299fbf`, `d9a8599` and others): pooled SQLAlchemy DB, removed `eval()`, sandboxed code execution, allowlisted file access, Alembic migrations, structured logging, unified routing, LLM-based memory extraction with upserts, formal Tool contract + `ToolRegistry`, single Reasoning Service entry point, `experiences` table, Step/Skill abstraction with real `Script`/`Validation`/`Metrics` (`ScriptMeta`, `Step.validate()`, `step_metrics` table), 3 Skills (`research_topic`, `file_digest`, `calculate_and_explain`), and a fix for `generate()` vs `generate_strict()` misuse in the code-gen/query-extraction paths.
 
-Found the actual gap first: `main.py` already computed a `success` flag from a hardcoded list of failure-string prefixes for the experience log — but never used that knowledge to protect the `response` field actually sent to the user. The detection existed; nothing acted on it. Also found the same list was duplicated, slightly differently, in `reasoning_service.py` — the identical "one fact, N hardcoded copies" pattern that caused the model-name bug earlier this session.
-
-**Built `services/validation_service.py`** as the single source of truth: `FAILURE_PREFIXES` (reasoning-layer + tool/skill-layer failure strings, previously two separate hand-maintained lists) and `validate_response()` (deterministic: empty output or known failure prefix → invalid). `reasoning_service.py` now imports the reasoning-only subset from there instead of keeping its own copy. `main.py`'s `/chat` endpoint calls `validate_response()` after generation; on failure, it now substitutes a clean user-facing message instead of delivering the raw internal string, and logs a new `response_validation_failed` event with the reason.
-
-**A real bug in my own first attempt at this wiring was caught live**, not assumed clean: an import-rename left one usage site in `reasoning_service.py` referencing the old (now-undefined) name, which surfaced as a live HTTP 500 the moment I tested it. Fixed, re-verified modules import cleanly, then re-tested.
-
-**Verified live, both the success and failure path, with DB evidence**:
-
-| id | tool_source | success | latency_ms | scenario |
-|---|---|---|---|---|
-| 9 | llm | true | 9809 | normal request, Ollama up — passes validation, unchanged behavior |
-| 10 | fallback | false | 0.7 | Ollama stopped mid-session — `generate()` returned `"Could not reach Ollama..."`, validator caught it (`reason: known_failure_prefix`), user received `"Something went wrong generating a response — please try again."` instead of the raw internal string |
-
-Structured logs for row 10 show the full expected chain: `ollama_unreachable` → `plan_decided` (source: fallback) → `ollama_unreachable` (second call) → `response_validation_failed` → `request_finished` (still HTTP 200, by design — a validation failure is not a server error, it's a handled, logged, gracefully-degraded response).
-
-**Scope boundary, explicit**: this is deterministic-only. LLM-based validation ("does this response actually answer the question") is out of scope for this pass, per the roadmap's own stated sequencing — add it as a second, separately-verified check once this one has run for a while, not bundled in from the start.
-
-See git history of this file for full details (commits `e4720c2`, `57f3dd1`, `c299fbf`, `d9a8599`). Summary: pooled DB, sandboxed code execution, allowlisted file access, unified routing, upserted memory, formal Tool contract + registry, single Reasoning Service entry point, Experience log, Step/Skill abstraction with real `Script`/`Validation`/`Metrics` (`ScriptMeta`, `Step.validate()`, `step_metrics` table), `generate_strict()` fix applied to the code-gen/web-query paths.
-
-## Resolved — E1: the Planner (committed as `eb874c7`)
-
-Prudhvi asked for the architecture built "however you think is perfect" — this is the natural next piece now that 3 structurally distinct Skills exist (satisfying Phase E's own stated precondition).
-
-1. **`services/planning_service.py`** — `plan(prompt, project_id) -> Plan`. The core design point, and what makes this a genuine improvement over the old `ai_decide_plugin()`: the LLM decision prompt is built **dynamically from `ToolRegistry.describe_all()` + `SkillRegistry.describe_all()`**, not a hardcoded 3-option string. Adding a 4th Tool or Skill makes it selectable automatically — nothing in `planning_service.py` needs to change. This is literally what `ROADMAP.md`'s E1 meant by "based on a capability registry, not keyword matching."
-2. **Graceful degradation chain**: registry-driven LLM decision → (if Ollama down) the old rule-based `decide_plugin()` as an offline fallback, Tool-only → (if that also finds nothing) raw reasoning. Verified live: with Ollama down, `9*9` still hit the free rule-based math path (no LLM call at all), and `"hello how are you"` correctly fell through the whole chain to `reasoning` with `source: "fallback"`.
-3. **Model selection split out from capability selection**, correcting a real inconsistency from Phase B: `ARCHITECTURE.md` assigns "Model selection" to the *Reasoning* Service, not Planning, but Phase B's `routing.route()` bundled both into one call. `services/routing.py` now does model selection only (`select_model()`); `planning_service.py` does capability selection only. Two independent decisions, not one blurred one — `main.py` calls both explicitly.
-4. **`services/extraction.py`** — pulled the query/filename/code-generation extraction logic out of `plugin_manager.py` into shared helpers, since the Planner needs the exact same extraction for building Skill input that `execute_plugin()` already did for Tool input. No prompt duplicated across two files.
-5. **`main.py` rewritten** to call `plan()` then `execute_plan()` instead of the old `routing.route()` + `execute_plugin()` pair. `request_id` is now fetched at the top of the handler (via structlog contextvars) instead of after response generation, so it can be threaded into `Skill.run()` for step-metrics logging.
-
-**A second real bug was found and fixed while verifying this**, not introduced by E1 but exposed by re-reading old E0-era `experiences` rows: the *old* success-detection heuristic in `main.py` didn't include `"Could not generate code"` as a failure prefix (that message didn't exist yet when the heuristic was first written), so an E0 test got logged as `success: true` despite genuinely failing. Fixed in the new `main.py`'s heuristic, which now also includes `"Couldn't complete this"` (the new Skill-failure message format).
-
-**A connector outage happened mid-verification** (Desktop Commander stalled on 3 consecutive calls, including a trivial `get_config`). One edit (a missing `plan_decided` log line for the rule-based math path) was confirmed NOT to have landed by re-reading the file after reconnecting, rather than assumed either way — then reapplied and re-verified from a clean server restart.
-
-**Verified live, full clean run after reconnecting, Ollama still down throughout**:
-- `9*9` → rule-based math path, `plan_decided` logged correctly, `experiences` row shows `tool: code, tool_source: rule, success: 1`
-- `"hello how are you"` → falls through the full chain to reasoning, `experiences` row shows `tool: null, tool_source: fallback, success: 0` (honestly reflecting Ollama being down)
-- Existing project data (`GET /projects`) still reads correctly through the new `main.py`
-- DB confirmed clean before and after: 3 memory rows, 25 chats, throughout
-
-## What's already right — keep these
-
-- **Registry-driven decision prompt** — this is the actual architectural upgrade E1 was supposed to deliver. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
-- **Model selection vs. capability selection as two separate calls** — matches `ARCHITECTURE.md`'s actual service boundaries. Don't re-merge them for convenience.
-- **Graceful multi-layer fallback (LLM → rule → reasoning)** — the system stays usable with the model provider fully down, proven repeatedly this session since Ollama was never once available.
-
-## Known gaps, unchanged from before
-
-- `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) the way `Step` now has via `ScriptMeta`. Not urgent until governance (Phase F+) needs it.
-- The Planner's LLM decision path itself has never been tested against a live Ollama response this entire session — only its fallback chain has real end-to-end verification. `_parse_decision()` and `_build_decision_prompt()` were unit-tested directly (proven correct against simulated inputs), but the full "ask Ollama, get back `skill:research_topic`, execute it" path is unverified against a real model. **Worth running once Ollama is available**, before trusting this in daily use.
-
-## Immediate next action
-
-Run one real end-to-end test with Ollama actually up, to close the one remaining unverified path (the live LLM decision, not just its fallback). Then decide: E2/E3 next, or expand the Skill/Tool set further first. See `HANDOFF.md` for the full session-transition brief.
+**E1 — the Planner** (`eb874c7`): `services/planning_service.py`, registry-driven capability selection (`ToolRegistry.describe_all()` + `SkillRegistry.describe_all()` build the decision prompt dynamically — adding a 4th Tool/Skill needs no code change here). Model selection split out of `routing.py` into its own concern (`select_model()`), correcting a Phase B inconsistency. Graceful degradation chain: LLM decision → rule-based fallback → raw reasoning, verified live with Ollama down (rule-based math path, and full fallback-to-reasoning for a non-math prompt). At the time, the live-LLM decision path itself was unverified — closed this session (see "Session narrative" above).
