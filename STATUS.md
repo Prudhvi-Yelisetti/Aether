@@ -1,6 +1,6 @@
 # Aether — Current Status
 
-_Last updated: July 22, 2026, after settling E1's live-LLM latency variance, shipping E2's first deterministic Validator check, and shipping E3's bounded retry/escalate Decision step — all three live-verified. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shipping E2's first deterministic Validator check, shipping E3's bounded retry/escalate Decision step, and adding retry backoff to E3 (with a self-caught correction on the first, wrongly-attributed verification attempt — see the narrative below). Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 **Continuing in a new session? Read `HANDOFF.md` first — it's the compact version of everything below.**
 
@@ -9,11 +9,11 @@ _Last updated: July 22, 2026, after settling E1's live-LLM latency variance, shi
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (first deterministic check) and E3 (bounded retry/escalate) both live and proven.** |
-| Commits | Model-name + `think`-mode + timeout + E2 committed as `ebf40a3`. Push to `origin/main` failed (no SSH access from this session) — push manually. **Uncommitted on top**: E3 (`services/decision_service.py`, `validation_service.py`'s retryable classification, `main.py`'s refactor to delegate to `decide()`). |
+| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (first deterministic check) and E3 (bounded retry/escalate, now with backoff) both live and proven.** |
+| Commits | `ebf40a3` (model-name + `think` + timeout + E2) and `62002a9` (E3 first pass) both committed and pushed to `origin/main` — Prudhvi pushed these after the earlier SSH failure in this session. **Uncommitted on top**: E3's retry backoff (`RETRY_DELAY_SECONDS`, `time.sleep()` in `decision_service.py`). |
 | Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across all sessions |
 | Critical blockers | 0 |
-| Next phase | Retry backoff (known gap) / rest of E2 (LLM-based validation) / expand the Skill set — Prudhvi's call |
+| Next phase | Rest of E2 (LLM-based validation) / expand the Skill set — Prudhvi's call |
 
 ## How to run it now
 
@@ -81,6 +81,16 @@ Built directly on E2: `validate_response()` now also classifies each known failu
 
 **Scope boundary, explicit**: bounded retry + escalate only, matching the roadmap's own framing. No exponential backoff, no configurable retry count, no per-capability-type policy beyond what the failure-prefix taxonomy already encodes.
 
+### 5. E3 follow-up — retry backoff added, with an honest correction
+
+Closed the gap above: `decision_service.py` now waits `RETRY_DELAY_SECONDS = 2.0` before the retry attempt, so a real transient outage gets an actual chance to clear instead of the retry hitting the identical dead window instantly.
+
+**First verification attempt overclaimed a result — corrected here rather than left standing.** Tried to prove recovery live: killed Ollama, then launched a chat request and `ollama serve` at nearly the same instant, expecting the retry to land after Ollama came back up. The request *did* succeed (24.8s, correct answer, "The capital of Italy is Rome"), but checking the full log for that request showed **no `decision_retry` and no `ollama_unreachable` event at all** — the very first attempt succeeded outright. What actually happened: enough real time had already elapsed across the sequence of tool calls (kill → confirm down → launch) that Ollama's HTTP listener was already up by the time the request's first attempt ran; the 14.7s the Planner's own decision call took was cold-model-load time, not a failed connection. A good outcome, wrong mechanism — this did not test the retry path at all, and claiming otherwise would have been exactly the kind of unproven claim this project has been explicit about avoiding.
+
+**Corrected with a deterministic test instead of relying on live infra timing**: called `decide()` directly with a controlled fake `attempt_fn` that fails once (returns a known transient-failure string) then succeeds. Result: `attempts: 2`, `valid: True`, `escalated: False`, response is the recovered value — and the measured gap between the two calls was exactly `2.0s`, matching `RETRY_DELAY_SECONDS`. This is the actual proof that the retry-with-backoff mechanism works, independent of whether a live Ollama restart happens to land in the window or not.
+
+The plain "Ollama down for the whole request" scenario (E3's original three-path table above) was re-confirmed with the delay in place: total request time is now ~2.0s instead of ~1.6ms, matching the added `time.sleep(2.0)` exactly.
+
 ## What's already right — keep these
 
 - **Registry-driven decision prompt** (E1) — the actual architectural upgrade. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
@@ -94,12 +104,12 @@ Built directly on E2: `validate_response()` now also classifies each known failu
 - Model name is a hardcoded pair (`qwen3.5:9b` / `qwen3-coder:latest`) duplicated across 7 files rather than defined once. Worth centralizing into `routing.py`'s constants and importing everywhere — the model-name bug was made possible by there being 7 places to get it wrong instead of one.
 - `services/router.py` — dead file, same model-name bug, not deleted. Zero callers, but a landmine if anyone ever imports it by mistake.
 - `think` hardcoded off everywhere via a default parameter. Fine for now; revisit only if answer quality on hard questions becomes a real concern, with the same live-proof discipline.
-- E3's retry has zero backoff between attempts — see the E3 writeup above.
+- `RETRY_DELAY_SECONDS = 2.0` is a guess, not a measured value — chosen as "long enough to plausibly clear a brief restart, short enough not to hurt perceived latency," never validated against a real outage's actual duration. Revisit with real data if it matters.
 - `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) the way `Step` now has via `ScriptMeta`. Not urgent until governance (Phase F+) needs it.
 
 ## Immediate next action
 
-Push `ebf40a3` (needs SSH access this session doesn't have) and commit + push E3 on top. Then decide: add retry backoff, continue E2 with LLM-based validation, or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Push `ebf40a3` and the E3 commit(s) on top (needs SSH access this session doesn't have). Then decide: continue E2 with LLM-based validation, or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 

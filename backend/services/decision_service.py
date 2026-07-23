@@ -8,8 +8,8 @@ callable that produces one attempt at a response, decide():
   1. runs it once
   2. validates the result (services/validation_service.py)
   3. if invalid AND the failure looks transient (validation.retryable),
-     retries — bounded to MAX_ATTEMPTS total, this is one extra try, not
-     a retry loop
+     waits RETRY_DELAY_SECONDS, then retries — bounded to MAX_ATTEMPTS
+     total, this is one extra try, not a retry loop
   4. if still invalid after that, escalates: returns a clear, honest
      failure message instead of ever delivering an internal error string
      (the exact bug E2 was built to close — see validation_service.py's
@@ -22,8 +22,16 @@ permanent), not re-decided here — Decision only acts on what Validation
 already determined. Keeps the two layers doing one job each, matching how
 Planning (capability selection) and the Reasoning Service (model
 selection) were deliberately kept as two separate calls in E1.
+
+RETRY_DELAY_SECONDS exists because the first version of this shipped with
+zero delay between attempts (see STATUS.md, 2026-07-22) — proven live to
+retry within milliseconds, which can never help a genuinely-down-for-a-
+moment Ollama since the retry hits the identical dead window. A short
+wait gives a real transient condition (brief restart, momentary network
+blip) an actual chance to clear before the retry fires.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -37,6 +45,11 @@ logger = get_logger("aether.decision")
 # that one retry isn't enough, the same discipline used for every other
 # fix this session (see STATUS.md).
 MAX_ATTEMPTS = 2
+
+# How long to wait before the retry attempt. Chosen to be long enough to
+# clear a brief Ollama restart/blip, short enough not to meaningfully hurt
+# perceived latency on top of a request that's already multiple seconds.
+RETRY_DELAY_SECONDS = 2.0
 
 
 @dataclass
@@ -63,7 +76,9 @@ def decide(attempt_fn: Callable[[], str]) -> DecisionResult:
             "decision_retry",
             reason=validation.reason,
             attempt_number=attempts + 1,
+            delay_seconds=RETRY_DELAY_SECONDS,
         )
+        time.sleep(RETRY_DELAY_SECONDS)
         response = attempt_fn()
         attempts += 1
         validation = validate_response(response)
