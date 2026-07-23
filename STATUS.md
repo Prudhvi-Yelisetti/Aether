@@ -10,7 +10,7 @@ _Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shi
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
 | Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (both increments) and E3 (with backoff) all live and proven.** |
-| Commits | `ebf40a3` (model-name + `think` + timeout + E2's first check) and `62002a9` (E3 first pass) committed and pushed to `origin/main`. **Uncommitted on top**: E3's retry backoff and E2's LLM-based validation (`validate_response_llm()`, opt-in `ChatRequest.llm_validate` field). |
+| Commits | `ebf40a3`, `62002a9` — pushed to `origin/main` (confirmed by Prudhvi after the earlier SSH failures in this session). `5196af7` (E3 backoff), `8e65c28` (E2 completion) — committed locally, **push not yet confirmed**; this session still has no working SSH access to verify or push. **Uncommitted on top of those**: deletion of dead `services/router.py`. |
 | Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across all sessions |
 | Critical blockers | 0 |
 | Next phase | Decide whether/when to promote LLM-based validation from observability to enforcement, or expand the Skill set — Prudhvi's call |
@@ -35,6 +35,8 @@ Proven live: first test request returned `"Error from mistral: {'error': \"model
 **Fixed across 7 files** to use the two models actually installed (`qwen3.5:9b` for decisions/reasoning/extraction, `qwen3-coder:latest` for code generation): `routing.py`, `planning_service.py`, `plugin_manager.py` (3 call sites), `extraction.py` (2 call sites), `memory_extraction.py`, `services/steps/summarize_step.py`, plus the misleading `model="llama3"` defaults in `reasoning_service.py`/`ollama_service.py`.
 
 **Not fixed, flagged for cleanup**: `services/router.py` is a dead, zero-caller duplicate of `routing.py`'s old logic, with the same broken model names. Recommend deleting — didn't do so unilaterally since it's a file removal, not a bug fix.
+
+*(Resolved 2026-07-23: deleted. Re-confirmed zero references anywhere in the codebase and no project-level test suite to break, then removed it and re-verified live — `main` imports cleanly, and a full `/chat` request still works end-to-end after the deletion.)*
 
 ### 2. Latency variance — root cause was `think` mode, not timeout or hardware
 
@@ -122,7 +124,6 @@ E2 is now done, both increments. E3's known gap (retry backoff, item 5 above) is
 ## Known gaps
 
 - Model name is a hardcoded pair (`qwen3.5:9b` / `qwen3-coder:latest`) duplicated across 7 files rather than defined once. Worth centralizing into `routing.py`'s constants and importing everywhere — the model-name bug was made possible by there being 7 places to get it wrong instead of one.
-- `services/router.py` — dead file, same model-name bug, not deleted. Zero callers, but a landmine if anyone ever imports it by mistake.
 - `think` hardcoded off everywhere via a default parameter. Fine for now; revisit only if answer quality on hard questions becomes a real concern, with the same live-proof discipline.
 - `RETRY_DELAY_SECONDS = 2.0` is a guess, not a measured value — chosen as "long enough to plausibly clear a brief restart, short enough not to hurt perceived latency," never validated against a real outage's actual duration. Revisit with real data if it matters.
 - `validate_response_llm()` is observability-only by design — no decision in the codebase currently acts on `llm_validation_flagged`. Whether/when to promote it to actually gate delivery or trigger a retry is an open, deliberate decision, not an oversight — see "Immediate next action."
@@ -130,7 +131,7 @@ E2 is now done, both increments. E3's known gap (retry backoff, item 5 above) is
 
 ## Immediate next action
 
-Push the latest commit (needs SSH access this session doesn't have). Then decide: promote `validate_response_llm()` from observability-only to actually gating delivery/retry (needs a monitoring period first to trust it), or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Confirm `5196af7` and `8e65c28` reached `origin/main` (not yet confirmed — this session couldn't verify), commit the `services/router.py` deletion and push that too. Then decide: run `llm_validate` on real traffic for a while before considering enforcement, or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 

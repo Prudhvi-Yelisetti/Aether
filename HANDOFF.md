@@ -6,7 +6,7 @@ Prudhvi is building Aether: a chatbot MVP evolving toward an AI Operating System
 
 ## Status
 
-**Phases A through E3 are implemented, and E2 is now fully complete (both increments).** Commits `ebf40a3` and `62002a9` are pushed to `origin/main`. **Uncommitted on top**: E3's retry backoff, and E2's LLM-based validation — see "Uncommitted changes" below.
+**Phases A through E3 are implemented, and E2 is now fully complete (both increments).** Commits `ebf40a3` and `62002a9` are confirmed pushed to `origin/main`. `5196af7` and `8e65c28` are committed locally but **push not confirmed** — this session's SSH access to the remote never worked, so neither could be verified nor pushed from here. `services/router.py` (dead code, flagged for several sessions) has also been deleted, committed locally only. See "Uncommitted changes" below for the precise state.
 
 Completed phases (see `ROADMAP.md` for full checklists, `STATUS.md` for verification details on each item):
 - **Phase A** — security: pooled SQLAlchemy DB, removed `eval()`, `bwrap`-sandboxed code execution, allowlisted file reads, Alembic migrations, structured logging + request IDs
@@ -36,14 +36,15 @@ Full detail, including every `experiences` table row from every test across the 
 
 ## Uncommitted changes (as of this handoff)
 
-Committed and pushed to `origin/main`: `ebf40a3` (model-name fix, `think` fix, timeout tuning, E2's deterministic check), `62002a9` (E3's first pass).
+Confirmed pushed to `origin/main`: `ebf40a3` (model-name fix, `think` fix, timeout tuning, E2's deterministic check), `62002a9` (E3's first pass) — Prudhvi pushed these after this session's own SSH access failed.
 
-**Not yet committed** (this session, after those pushes):
-- `services/decision_service.py` — retry backoff (`RETRY_DELAY_SECONDS = 2.0`, `time.sleep()` before the retry attempt)
-- `services/validation_service.py` — new `validate_response_llm()`, E2's LLM-based check
-- `backend/main.py` — `ChatRequest.llm_validate` field (opt-in, default `False`), wiring to call `validate_response_llm()` and log-only on result
-- `STATUS.md`, `ROADMAP.md` — updated with all of the above
-- **Not fixed, still flagged**: `services/router.py` is a dead, zero-caller file with the original model-name bug — recommend deleting, wasn't done unilaterally
+Committed locally, **push not yet confirmed** (this session still has no working SSH access to check or push):
+- `5196af7` — E3's retry backoff (`RETRY_DELAY_SECONDS = 2.0`, `time.sleep()` before the retry attempt)
+- `8e65c28` — E2's completion: `validate_response_llm()`, `ChatRequest.llm_validate` opt-in field
+
+**Not yet committed at all**:
+- Deletion of `services/router.py` (dead, zero-caller file with the original model-name bug) — re-confirmed zero references anywhere in the codebase, deleted, re-verified live (`main` imports cleanly, a full `/chat` request still works after the deletion)
+- `STATUS.md`, `ROADMAP.md`, this file — updated with all of the above
 
 Local DB baseline (verified clean throughout): 1 project, 3 memory rows, 25 chats unchanged across every test this session and the prior one.
 
@@ -75,7 +76,6 @@ Local DB baseline (verified clean throughout): 1 project, 3 memory rows, 25 chat
    - Run `llm_validate: true` on real traffic for a while, then decide whether to promote it from observability-only to actually gating delivery/retry
    - Expand the Tool/Skill set further
 3. Known gap, not urgent: `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) that `Step` now has via `ScriptMeta`. Worth the same treatment once governance (Phase F+) actually needs it.
-4. Consider deleting `services/router.py` (dead code, same bug, zero callers).
 
 ## Open questions
 
