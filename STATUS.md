@@ -1,6 +1,6 @@
 # Aether — Current Status
 
-_Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shipping E2's first deterministic Validator check, shipping E3's bounded retry/escalate Decision step, and adding retry backoff to E3 (with a self-caught correction on the first, wrongly-attributed verification attempt — see the narrative below). Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shipping both increments of E2 (deterministic + LLM-based, the latter opt-in/observability-only), shipping E3's bounded retry/escalate Decision step, and adding retry backoff to E3 (with a self-caught correction on the first, wrongly-attributed verification attempt — see the narrative below). Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 **Continuing in a new session? Read `HANDOFF.md` first — it's the compact version of everything below.**
 
@@ -9,11 +9,11 @@ _Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shi
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (first deterministic check) and E3 (bounded retry/escalate, now with backoff) both live and proven.** |
-| Commits | `ebf40a3` (model-name + `think` + timeout + E2) and `62002a9` (E3 first pass) both committed and pushed to `origin/main` — Prudhvi pushed these after the earlier SSH failure in this session. **Uncommitted on top**: E3's retry backoff (`RETRY_DELAY_SECONDS`, `time.sleep()` in `decision_service.py`). |
+| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (both increments) and E3 (with backoff) all live and proven.** |
+| Commits | `ebf40a3` (model-name + `think` + timeout + E2's first check) and `62002a9` (E3 first pass) committed and pushed to `origin/main`. **Uncommitted on top**: E3's retry backoff and E2's LLM-based validation (`validate_response_llm()`, opt-in `ChatRequest.llm_validate` field). |
 | Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across all sessions |
 | Critical blockers | 0 |
-| Next phase | Rest of E2 (LLM-based validation) / expand the Skill set — Prudhvi's call |
+| Next phase | Decide whether/when to promote LLM-based validation from observability to enforcement, or expand the Skill set — Prudhvi's call |
 
 ## How to run it now
 
@@ -91,6 +91,26 @@ Closed the gap above: `decision_service.py` now waits `RETRY_DELAY_SECONDS = 2.0
 
 The plain "Ollama down for the whole request" scenario (E3's original three-path table above) was re-confirmed with the delay in place: total request time is now ~2.0s instead of ~1.6ms, matching the added `time.sleep(2.0)` exactly.
 
+### 6. E2 completed — LLM-based validation, opt-in and observability-only
+
+Added the second increment the roadmap's own sequencing deferred: `validate_response_llm(prompt, response)` in `validation_service.py`, asking a model whether a response actually addresses the prompt — one word, yes/no, via `generate_strict()`.
+
+**Deliberately not wired to gate delivery or retry.** Added `ChatRequest.llm_validate: bool = False` — off by default. When on, `main.py` runs this check *after* `decide()` already returned a valid response (no point asking an LLM to judge something already known to be a failure string) and only logs the result (`llm_validation_result` if accepted, `llm_validation_flagged` if not) — it does not change `response`, `success` in the experience log, or trigger a retry. Reasoning: an LLM judge can be wrong, and an unreliable judge silently rejecting genuinely good answers would be worse than not judging them at all. Promoting this to actually gate delivery is a deliberate future decision, made with evidence from this observability period, not assumed from the start.
+
+**Live-verified, three cases**:
+
+| case | result |
+|---|---|
+| genuinely good, on-topic answer | `valid: True` — accepted |
+| deliberately off-topic answer ("I like pizza and sunny weather" for "What is the capital of Japan?") | `valid: False, reason: llm_validation_flagged` — correctly caught |
+| judge itself unavailable (Ollama down) | `valid: True, reason: llm_check_unavailable` — fails open, does not penalize the response for an unrelated outage |
+
+Also confirmed live in the actual `/chat` endpoint: default request (no `llm_validate` field) produces zero extra LLM calls and zero extra log lines — opt-in is real, not just documented. With `llm_validate: true` set, a good answer logs `llm_validation_result` with no change to the delivered response.
+
+**Cost/latency, explicit**: this is an *extra* LLM call on top of the request's own generation — roughly doubles latency for any request that opts in. That's the whole reason it's off by default rather than always-on.
+
+E2 is now done, both increments. E3's known gap (retry backoff, item 5 above) is also closed. Remaining open items are listed in "Known gaps" below.
+
 ## What's already right — keep these
 
 - **Registry-driven decision prompt** (E1) — the actual architectural upgrade. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
@@ -105,11 +125,12 @@ The plain "Ollama down for the whole request" scenario (E3's original three-path
 - `services/router.py` — dead file, same model-name bug, not deleted. Zero callers, but a landmine if anyone ever imports it by mistake.
 - `think` hardcoded off everywhere via a default parameter. Fine for now; revisit only if answer quality on hard questions becomes a real concern, with the same live-proof discipline.
 - `RETRY_DELAY_SECONDS = 2.0` is a guess, not a measured value — chosen as "long enough to plausibly clear a brief restart, short enough not to hurt perceived latency," never validated against a real outage's actual duration. Revisit with real data if it matters.
+- `validate_response_llm()` is observability-only by design — no decision in the codebase currently acts on `llm_validation_flagged`. Whether/when to promote it to actually gate delivery or trigger a retry is an open, deliberate decision, not an oversight — see "Immediate next action."
 - `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) the way `Step` now has via `ScriptMeta`. Not urgent until governance (Phase F+) needs it.
 
 ## Immediate next action
 
-Push `ebf40a3` and the E3 commit(s) on top (needs SSH access this session doesn't have). Then decide: continue E2 with LLM-based validation, or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Push the latest commit (needs SSH access this session doesn't have). Then decide: promote `validate_response_llm()` from observability-only to actually gating delivery/retry (needs a monitoring period first to trust it), or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 

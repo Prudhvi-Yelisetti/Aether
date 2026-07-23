@@ -11,6 +11,7 @@ from services.reasoning_service import generate
 from services.routing import select_model
 from services.planning_service import plan, execute_plan
 from services.decision_service import decide
+from services.validation_service import validate_response_llm
 from storage.project_store import (
     create_project,
     get_projects,
@@ -78,6 +79,12 @@ class ChatRequest(BaseModel):
     mode: str = "smart"
     project_id: Optional[str] = None
     chat_id: Optional[int] = None
+    # E2's LLM-based check (validation_service.validate_response_llm) —
+    # opt-in and observability-only for this first pass, see that
+    # function's docstring for why. Off by default: it's an extra LLM
+    # call on top of the request's own generation, so it's not free, and
+    # it hasn't been proven reliable enough to run on every request yet.
+    llm_validate: bool = False
 
 
 class ProjectRequest(BaseModel):
@@ -180,6 +187,25 @@ def chat(request: ChatRequest):
         success=decision.valid,
         latency_ms=latency_ms,
     )
+
+    # -------- LLM-based Validation (Phase E2, second check — opt-in, --------
+    # -------- observability-only, see validation_service.py) -----------
+    # Only worth asking an LLM to judge a response the deterministic check
+    # already accepted — no point double-checking something already known
+    # to be a failure string. Logged only; does not change what's
+    # delivered or retried this pass — see validate_response_llm()'s
+    # docstring for why that's deliberate right now.
+    if request.llm_validate and decision.valid:
+        llm_validation = validate_response_llm(prompt, response)
+        if llm_validation.valid:
+            logger.info("llm_validation_result", reason=llm_validation.reason)
+        else:
+            logger.warning(
+                "llm_validation_flagged",
+                reason=llm_validation.reason,
+                capability_type=the_plan.capability_type,
+                capability_name=the_plan.capability_name,
+            )
 
     # -------- Memory Extraction (LLM-based, upserted — see memory_extraction.py) --------
     if project_id:

@@ -105,3 +105,46 @@ def validate_response(response: str | None) -> ValidationResult:
             return ValidationResult(valid=False, reason="known_failure_prefix", retryable=retryable)
 
     return ValidationResult(valid=True)
+
+
+_LLM_CHECK_PROMPT = """You are checking whether a chatbot's response actually addresses the user's question — on-topic and non-empty, not whether it is stylistically perfect.
+
+Question: {prompt}
+
+Response: {response}
+
+Does the response address the question? Answer with exactly one word: yes or no."""
+
+
+def validate_response_llm(prompt: str, response: str) -> ValidationResult:
+    """LLM-based validation: does the response actually address the
+    prompt? Deliberately a second, SEPARATE check from validate_response()
+    above, not a replacement — only call this after the deterministic
+    check has already passed (no point asking an LLM to judge a response
+    already known to be a failure string).
+
+    Deliberately observability-only for this first pass, per the
+    roadmap's own stated caution about LLM-based validation being a
+    bigger, later addition than the deterministic checks. Nothing in
+    main.py currently changes what's delivered or retried based on this
+    result — it's wired to log-only until this specific check has run for
+    a while and been shown to be reliable (an LLM judge can be wrong, and
+    an unreliable judge silently rejecting genuinely good answers would be
+    a worse outcome than not judging them at all). Promoting this to
+    actually gate delivery/retry is a deliberate future decision, not a
+    default this function should assume for its caller.
+
+    A failure of the *judge itself* (Ollama down, etc.) returns valid=True
+    with reason="llm_check_unavailable" — it should never penalize a real
+    response for an unrelated LLM outage."""
+    from services.reasoning_service import generate_strict, ReasoningError
+
+    check_prompt = _LLM_CHECK_PROMPT.format(prompt=prompt, response=response)
+    try:
+        raw = generate_strict(check_prompt).strip().lower()
+    except ReasoningError:
+        return ValidationResult(valid=True, reason="llm_check_unavailable")
+
+    if raw.startswith("no"):
+        return ValidationResult(valid=False, reason="llm_validation_flagged", retryable=False)
+    return ValidationResult(valid=True)
