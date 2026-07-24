@@ -30,7 +30,7 @@ from services.reasoning_service import generate_strict, ReasoningError
 from services.tools.registry import registry as tool_registry
 from services.skills.registry import registry as skill_registry
 from services.plugin_manager import decide_plugin, is_simple_math
-from services.extraction import extract_filename, extract_search_query, generate_code
+from services.extraction import extract_filename, extract_search_query, generate_code, slugify_filename
 from services.logging_config import get_logger
 
 logger = get_logger("aether.planning")
@@ -94,6 +94,15 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
         if not project_id:
             return None
         return {"query": extract_search_query(prompt), "project_id": project_id}
+
+    if capability_name == "research_and_save_file":
+        # No project_id needed — this Skill saves to a file in the
+        # workspace, not project memory (see research_topic above for the
+        # memory-writing equivalent). filename is deterministic
+        # (slugify_filename), not another LLM call — matches
+        # extract_filename()'s "this is parsing, not reasoning" rationale.
+        query = extract_search_query(prompt)
+        return {"query": query, "filename": slugify_filename(query)}
 
     if capability_name == "file_digest":
         if not project_id:

@@ -10,6 +10,23 @@ clean search query exactly the same way the bare "web" Tool path does.
 
 from services.reasoning_service import generate_strict, ReasoningError
 
+MAX_SLUG_LENGTH = 60
+
+
+def slugify_filename(text: str, extension: str = "txt") -> str:
+    """Deterministic — no LLM call, matching extract_filename()'s own
+    reasoning for why this doesn't need one. Turns free text (e.g. a
+    search query) into a safe filename: lowercase, non-alphanumeric
+    collapsed to underscores, truncated. Used by
+    ResearchAndSaveFileSkill so it doesn't need to ask the user (or an
+    LLM) to name the output file — the topic itself is a reasonable
+    default name."""
+    cleaned = "".join(c if c.isalnum() else "_" for c in text.strip().lower())
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    cleaned = cleaned.strip("_") or "untitled"
+    return f"{cleaned[:MAX_SLUG_LENGTH]}.{extension}"
+
 
 def extract_filename(prompt: str) -> str | None:
     """Deterministic — no LLM call. A word containing '.' is assumed to be

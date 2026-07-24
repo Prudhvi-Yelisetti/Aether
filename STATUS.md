@@ -1,6 +1,6 @@
 # Aether — Current Status
 
-_Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shipping both increments of E2 (deterministic + LLM-based, the latter opt-in/observability-only), shipping E3's bounded retry/escalate Decision step, and adding retry backoff to E3 (with a self-caught correction on the first, wrongly-attributed verification attempt — see the narrative below). Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shipping both increments of E2 (deterministic + LLM-based, the latter opt-in/observability-only), shipping E3's bounded retry/escalate Decision step with backoff, deleting dead `services/router.py`, and expanding the Tool/Skill set (a new `write_file` capability and a Skill composing it with existing Steps). Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 **Continuing in a new session? Read `HANDOFF.md` first — it's the compact version of everything below.**
 
@@ -9,11 +9,11 @@ _Last updated: July 23, 2026, after settling E1's live-LLM latency variance, shi
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (both increments) and E3 (with backoff) all live and proven.** |
-| Commits | `ebf40a3`, `62002a9` — pushed to `origin/main` (confirmed by Prudhvi after the earlier SSH failures in this session). `5196af7` (E3 backoff), `8e65c28` (E2 completion) — committed locally, **push not yet confirmed**; this session still has no working SSH access to verify or push. **Uncommitted on top of those**: deletion of dead `services/router.py`. |
+| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified (fast, reliable). E2 (both increments) and E3 (with backoff) all live and proven. 4th Tool (`write_file`) and 4th Skill (`research_and_save_file`) added, both live-verified.** |
+| Commits | `ebf40a3`, `62002a9` — pushed to `origin/main` (confirmed by Prudhvi). `5196af7` (E3 backoff), `8e65c28` (E2 completion), `1880557` (`router.py` deletion) — committed locally, **push not yet confirmed**; this session still has no working SSH access to verify or push. **Uncommitted on top of those**: the Tool/Skill expansion (`write_file` Tool/Step/plugin, `ResearchAndSaveFileSkill`, wiring). |
 | Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across all sessions |
 | Critical blockers | 0 |
-| Next phase | Decide whether/when to promote LLM-based validation from observability to enforcement, or expand the Skill set — Prudhvi's call |
+| Next phase | Decide whether/when to promote LLM-based validation from observability to enforcement, fix the DuckDuckGo/query-extraction fragility found this session, or keep expanding the Skill/Tool set — Prudhvi's call |
 
 ## How to run it now
 
@@ -113,6 +113,26 @@ Also confirmed live in the actual `/chat` endpoint: default request (no `llm_val
 
 E2 is now done, both increments. E3's known gap (retry backoff, item 5 above) is also closed. Remaining open items are listed in "Known gaps" below.
 
+### 7. Tool/Skill expansion — a real write capability, a new Skill composing it with existing Steps, and a real pre-existing limitation found along the way
+
+Closed a genuine capability gap: Aether could only *read* files, never create or save one. Added, matching every existing convention exactly:
+
+- **`plugins/file_writer.py`** — `write_file(filename, content)`, reusing `resolve_safe_path()` from `file_reader.py` rather than a second copy of the same escape-check logic. Caps content at 20KB (`MAX_WRITE_BYTES`), overwrites on an existing name (no append/versioning — simplest first version).
+- **`services/tools/write_file_tool.py`** — `WriteFileTool`, registered in `ToolRegistry`.
+- **`services/steps/write_file_step.py`** — `WriteFileStep`, configurable `source_key` (same reuse pattern as `SummarizeStep`/`SaveMemoryStep`).
+- **`services/extraction.py`** — new `slugify_filename()`, deterministic (no LLM call, same rationale as `extract_filename()`), turns a topic string into a safe filename.
+- **New Skill: `ResearchAndSaveFileSkill`** (`services/skills/research_and_save_file_skill.py`) — composes the *existing* `WebSearchStep` + `SummarizeStep` (built for `ResearchTopicSkill`) with the new `WriteFileStep`. Genuine reuse, not duplication — the actual point of the Step/Skill split.
+- **Wired into the live Planner**: added the `research_and_save_file` branch to `planning_service._build_skill_input()`. Also fixed a stale docstring in `services/skills/registry.py` that still said Skills weren't wired into `/chat` — they have been since E1.
+
+**Live-verified**:
+- Both registries load the new entries (`tools: [..., 'write_file']`, `skills: [..., 'research_and_save_file']`).
+- `write_file` → `file` (read) round-trip confirmed byte-for-byte.
+- Security boundaries hold: path traversal blocked (`Access denied`), oversized content blocked (`Content too large`) — same as the existing read tool.
+- Full `ResearchAndSaveFileSkill.run()` in isolation: all three steps (`web_search`, `summarize`, `write_file`) succeeded and validated; read the saved file back to confirm real, correct content landed on disk.
+- **Through the actual live `/chat` endpoint, twice**: the Planner correctly selected `capability_type: skill, capability_name: research_and_save_file, source: llm` from a plain natural-language prompt on its own, using the registry-driven decision prompt — no hardcoding needed for a 4th/5th capability, exactly as E1 was designed to allow.
+
+**Found, not fixed (pre-existing, not introduced by this work)**: both live `/chat` attempts had their `web_search` step fail with `"No useful results found"`, escalating correctly (non-retryable, 1 attempt, no wasted retry — the Decision layer behaved exactly right). Root-caused: `web_search.py` calls DuckDuckGo's **Instant Answer API** (`api.duckduckgo.com/?format=json`), which only returns results for a narrow set of Wikipedia-lead-paragraph-style topic strings — not a general web search. `extract_search_query()`'s LLM-extracted phrasing (e.g. `"Great Wall of China research"` — reordered, with a word appended) doesn't match that API's narrow keying, even though a raw string like `"the Great Wall of China"` does. **This affects `ResearchTopicSkill` identically** — it shares the exact same `extract_search_query()` call and `WebSearchStep` — so it is not specific to the new Skill, and was already true before this session touched anything. Flagged as a real, separate opportunity (a proper search API, or having `extract_search_query()` preserve more of the original phrasing) rather than fixed here — out of scope for a Tool/Skill *expansion* task, and deserves its own verification pass rather than a rushed fix bundled into this one.
+
 ## What's already right — keep these
 
 - **Registry-driven decision prompt** (E1) — the actual architectural upgrade. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
@@ -120,6 +140,7 @@ E2 is now done, both increments. E3's known gap (retry backoff, item 5 above) is
 - **Graceful multi-layer fallback (LLM → rule → reasoning)** — kept the system usable through Ollama being fully down for an entire prior session, and (double-edged, see below) is exactly what let the model-name bug go unnoticed for as long as it did.
 - **Validation and Decision as two separate concerns** (E2/E3) — `validate_response()` only classifies; `decide()` only acts on that classification. Don't collapse them for convenience the same way model/capability selection shouldn't be collapsed.
 - **`experiences.tool_source`** is the one reliable signal for "did the live LLM actually get used" — response text alone degrades too gracefully to tell. Check it, don't guess from the reply, whenever verifying live-LLM behavior specifically.
+- **Compose existing Steps into a new Skill rather than writing new logic** — `ResearchAndSaveFileSkill` reused `WebSearchStep`/`SummarizeStep` unchanged and only added the one genuinely new piece (`WriteFileStep`). Check for an existing Step first; a new Skill duplicating an existing Step's logic is a design smell, not a shortcut.
 
 ## Known gaps
 
@@ -128,10 +149,11 @@ E2 is now done, both increments. E3's known gap (retry backoff, item 5 above) is
 - `RETRY_DELAY_SECONDS = 2.0` is a guess, not a measured value — chosen as "long enough to plausibly clear a brief restart, short enough not to hurt perceived latency," never validated against a real outage's actual duration. Revisit with real data if it matters.
 - `validate_response_llm()` is observability-only by design — no decision in the codebase currently acts on `llm_validation_flagged`. Whether/when to promote it to actually gate delivery or trigger a retry is an open, deliberate decision, not an oversight — see "Immediate next action."
 - `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) the way `Step` now has via `ScriptMeta`. Not urgent until governance (Phase F+) needs it.
+- `web_search.py`'s DuckDuckGo Instant Answer API is narrow (Wikipedia-lead-paragraph-style topics only, not general search) and `extract_search_query()`'s LLM-extracted phrasing often doesn't match it even when a raw string would — affects both `research_topic` and the new `research_and_save_file` identically. Real, pre-existing, not fixed this session — see the Tool/Skill expansion writeup above.
 
 ## Immediate next action
 
-Confirm `5196af7` and `8e65c28` reached `origin/main` (not yet confirmed — this session couldn't verify), commit the `services/router.py` deletion and push that too. Then decide: run `llm_validate` on real traffic for a while before considering enforcement, or expand the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Commit and push the Tool/Skill expansion (`write_file` Tool/Step/plugin, `ResearchAndSaveFileSkill`, `planning_service.py`/`skills/registry.py` wiring) — currently uncommitted. (`services/router.py`'s deletion is already committed as `1880557`, separate from this.) Confirm `5196af7`, `8e65c28`, and `1880557` actually reached `origin/main` — still not confirmed from this session, no working SSH access. Then decide: fix the DuckDuckGo/query-extraction fragility above, run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 

@@ -1,18 +1,19 @@
 """
 SkillRegistry: mirrors ToolRegistry (services/tools/registry.py). Not the
 Planner itself — just makes "what Skills exist" queryable, the way
-"what Tools exist" already is. A future Planner (Phase E1) needs both
-registries to choose between Tool / Skill / raw reasoning.
-
-None of these Skills are wired into the live /chat path yet. Deciding
-when to invoke a Skill vs. a Tool vs. raw reasoning is the Planner's job —
-see ROADMAP.md's note on E1 for why that's deliberately not built yet.
+"what Tools exist" already is. services/planning_service.py (Phase E1)
+uses both registries to choose between Tool / Skill / raw reasoning, and
+is where a Skill's initial_context actually gets built from a live prompt
+(see _build_skill_input() there) — every Skill registered here needs a
+matching branch in that function to be reachable from /chat, not just
+importable.
 """
 
 from services.skills.base import Skill
 from services.skills.research_topic_skill import ResearchTopicSkill
 from services.skills.file_digest_skill import FileDigestSkill
 from services.skills.calculate_and_explain_skill import CalculateAndExplainSkill
+from services.skills.research_and_save_file_skill import ResearchAndSaveFileSkill
 
 
 class SkillRegistry:
@@ -43,3 +44,4 @@ registry = SkillRegistry()
 registry.register(ResearchTopicSkill())
 registry.register(FileDigestSkill())
 registry.register(CalculateAndExplainSkill())
+registry.register(ResearchAndSaveFileSkill())
