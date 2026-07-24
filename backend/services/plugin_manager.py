@@ -1,6 +1,7 @@
 from services.reasoning_service import generate, generate_strict, ReasoningError
 from services.extraction import extract_filename, extract_search_query, generate_code
 from services.tools.registry import registry
+from services.routing import FAST_MODEL
 import ast
 import operator
 import re
@@ -93,7 +94,7 @@ Rules:
 Request: {prompt}
 """
 
-    decision = generate(decision_prompt, model="qwen3.5:9b").strip().lower()
+    decision = generate(decision_prompt, model=FAST_MODEL).strip().lower()
 
     if "code" in decision:
         return "code"
@@ -152,7 +153,7 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
 
         summary = generate(
             f"Summarize this file content clearly:\n{result.output}",
-            model="qwen3.5:9b"
+            model=FAST_MODEL
         )
         return summary
 
@@ -166,7 +167,7 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
 
         summary = generate(
             f"Explain this simply:\n{result.output}",
-            model="qwen3.5:9b"
+            model=FAST_MODEL
         )
         return summary
 

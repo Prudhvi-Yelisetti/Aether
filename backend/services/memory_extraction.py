@@ -16,6 +16,7 @@ import json
 
 from services.logging_config import get_logger
 from services.reasoning_service import generate
+from services.routing import FAST_MODEL
 
 logger = get_logger("aether.memory")
 
@@ -41,7 +42,7 @@ def extract_memory_facts(prompt: str) -> dict:
     try:
         raw = generate(
             EXTRACTION_PROMPT.format(prompt=prompt),
-            model="qwen3.5:9b",
+            model=FAST_MODEL,
         )
         # Models sometimes wrap JSON in prose or code fences; grab the
         # {...} span rather than requiring an exact-match response.

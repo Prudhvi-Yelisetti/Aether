@@ -1,6 +1,7 @@
 from services.steps.base import Step, StepResult, ValidationResult
 from services.steps.script_meta import ScriptMeta
 from services.reasoning_service import generate_strict, ReasoningError
+from services.routing import FAST_MODEL
 
 MIN_SUMMARY_LENGTH = 10
 
@@ -46,7 +47,7 @@ class SummarizeStep(Step):
             return StepResult(success=False, error=f"context['{self.source_key}'] is required")
 
         try:
-            summary = generate_strict(f"Explain this simply:\n{raw_text}", model="qwen3.5:9b")
+            summary = generate_strict(f"Explain this simply:\n{raw_text}", model=FAST_MODEL)
             return StepResult(success=True, output=summary)
         except ReasoningError as e:
             return StepResult(success=False, error=str(e))

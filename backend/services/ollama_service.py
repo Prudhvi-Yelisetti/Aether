@@ -1,6 +1,7 @@
 import requests
 
 from services.logging_config import get_logger
+from services.routing import FAST_MODEL
 
 logger = get_logger("aether.ollama")
 
@@ -17,7 +18,7 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 REQUEST_TIMEOUT_SECONDS = 60
 
 
-def generate_response(prompt: str, model: str = "qwen3.5:9b", history=None, memory=None, think: bool = False):
+def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory=None, think: bool = False):
     full_prompt = ""
 
     # -------- SYSTEM INSTRUCTIONS --------

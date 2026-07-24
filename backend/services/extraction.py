@@ -9,6 +9,7 @@ clean search query exactly the same way the bare "web" Tool path does.
 """
 
 from services.reasoning_service import generate_strict, ReasoningError
+from services.routing import FAST_MODEL, STRONG_MODEL
 
 MAX_SLUG_LENGTH = 60
 
@@ -65,7 +66,7 @@ Return ONLY the topic, nothing else.
 Request: {prompt}
 """
     try:
-        return generate_strict(query_prompt, model="qwen3.5:9b").strip()
+        return generate_strict(query_prompt, model=FAST_MODEL).strip()
     except ReasoningError:
         return prompt
 
@@ -88,4 +89,4 @@ Rules:
 
 Request: {prompt}
 """
-    return generate_strict(code_prompt, model="qwen3-coder:latest")
+    return generate_strict(code_prompt, model=STRONG_MODEL)

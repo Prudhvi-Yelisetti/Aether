@@ -32,6 +32,7 @@ from services.skills.registry import registry as skill_registry
 from services.plugin_manager import decide_plugin, is_simple_math
 from services.extraction import extract_filename, extract_search_query, generate_code, slugify_filename
 from services.logging_config import get_logger
+from services.routing import FAST_MODEL
 
 logger = get_logger("aether.planning")
 
@@ -130,12 +131,15 @@ def plan(prompt: str, project_id: str | None = None) -> Plan:
         return Plan(capability_type="tool", capability_name="code", source="rule")
 
     try:
-        # qwen3.5:9b: fast, has "tools" capability, matches routing.py's
-        # FAST_MODEL — was hardcoded "mistral" (not an installed model,
-        # verified live 2026-07-21), which meant this call always raised
-        # ReasoningError and silently took the fallback path below, even
-        # with Ollama running. See STATUS.md.
-        raw = generate_strict(_build_decision_prompt(prompt), model="qwen3.5:9b")
+        # FAST_MODEL (routing.py): fast, has "tools" capability. This
+        # call was hardcoded "mistral" (not an installed model, verified
+        # live 2026-07-21), which meant it always raised ReasoningError
+        # and silently took the fallback path below, even with Ollama
+        # running. See STATUS.md. Centralized 2026-07-24 to import the
+        # constant from routing.py instead of its own hardcoded string —
+        # that "one fact, N hardcoded copies" pattern is exactly what
+        # caused the original bug.
+        raw = generate_strict(_build_decision_prompt(prompt), model=FAST_MODEL)
         capability_type, capability_name = _parse_decision(raw)
     except ReasoningError:
         # Ollama down: degrade to the offline rule-based tool decision
