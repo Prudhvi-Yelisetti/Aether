@@ -39,10 +39,28 @@ def extract_search_query(prompt: str) -> str:
     """Uses generate_strict() because the result feeds into a search call —
     an automated next step, not something a human reads directly. Falls
     back to the raw prompt (not the LLM's failure string) if extraction
-    fails, so a search still runs instead of the whole path crashing."""
+    fails, so a search still runs instead of the whole path crashing.
+
+    Prompt tightened 2026-07-23 (see STATUS.md): the original wording let
+    the model add filler ("research", "look up", "information about") and
+    reorder the topic itself, e.g. "the Great Wall of China" ->
+    "Great Wall of China research". That reordering alone was enough to
+    make DuckDuckGo's Instant Answer API return nothing for a topic it
+    otherwise recognizes fine — its keying is exact-topic-narrow, not
+    fuzzy. Preserving the request's own wording gives that narrow API a
+    real chance to match, on top of the Wikipedia fallback added to
+    web_search.py for when it still doesn't."""
     query_prompt = f"""
-Extract the main search query from this user request.
-Return ONLY the search query.
+Extract the core topic or entity this request is about — the way it
+would appear as an encyclopedia article title, not a description of
+what to do with it.
+
+Preserve the exact wording and word order used for the topic in the
+request itself. Do not add words like "research", "information about",
+"details on", or "look up". Do not paraphrase or reorder the topic's
+own words.
+
+Return ONLY the topic, nothing else.
 
 Request: {prompt}
 """
