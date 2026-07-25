@@ -1,6 +1,6 @@
 # Aether — Current Status
 
-_Last updated: July 24, 2026, after settling E1's live-LLM latency variance, shipping both increments of E2, shipping E3 with backoff, deleting dead `services/router.py`, expanding the Tool/Skill set (`write_file` + `research_and_save_file`), and fixing the DuckDuckGo/query-extraction fragility that expansion surfaced. Update this file whenever a Critical/Important item is resolved or a new one is found._
+_Last updated: July 25, 2026, after settling E1's live-LLM latency variance, shipping both increments of E2, shipping E3 with backoff, deleting dead `services/router.py`, expanding the Tool/Skill set twice (`write_file`+`research_and_save_file`, then `list_files`+`find_and_digest_file`), fixing the DuckDuckGo/query-extraction fragility, centralizing the model name, and diagnosing the SSH push blocker. Update this file whenever a Critical/Important item is resolved or a new one is found._
 
 **Continuing in a new session? Read `HANDOFF.md` first — it's the compact version of everything below.**
 
@@ -9,8 +9,8 @@ _Last updated: July 24, 2026, after settling E1's live-LLM latency variance, shi
 | | |
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
-| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified. E2 (both increments) and E3 (with backoff) all live and proven. 4th Tool (`write_file`) and 4th Skill (`research_and_save_file`) added and live-verified, including a full end-to-end pass that produces a real file. DuckDuckGo/query-extraction fragility found and fixed the same day.** |
-| Commits | `ebf40a3`, `62002a9` — pushed to `origin/main` (confirmed by Prudhvi). `5196af7`, `8e65c28`, `1880557`, `df2463b`, `8f0bf13`, `18b2d8c` — committed locally, **push not yet confirmed**; SSH key exists but needs its passphrase entered locally (`ssh-add`) — diagnosed, not fixable from this session. Working tree clean, nothing uncommitted right now. |
+| Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified. E2 (both increments) and E3 (with backoff) all live and proven. 5 Tools, 5 Skills — all live-verified, including two full end-to-end passes that each produce real, correct output from realistic natural-language prompts.** |
+| Commits | `ebf40a3`, `62002a9` — pushed to `origin/main` (confirmed by Prudhvi). `5196af7`, `8e65c28`, `1880557`, `df2463b`, `8f0bf13`, `18b2d8c`, `8c3ef99` — committed locally, **push not yet confirmed**; SSH key exists but needs its passphrase entered locally (`ssh-add`) — diagnosed, not fixable from this session. **Uncommitted right now**: the second Tool/Skill expansion (`list_files` + `find_and_digest_file`, item 10). |
 | Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across all sessions |
 | Critical blockers | 0 |
 | Next phase | Run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set — Prudhvi's call |
@@ -174,6 +174,29 @@ Two of five still fail — both are messier strings that wouldn't actually occur
 
 **The specific thing this fix was for — `web_search` succeeding on a previously-broken prompt — worked in all three attempts, no exceptions.** The two escalations were a separate, already-documented issue (Ollama latency variance) doing exactly what the Decision layer is designed to do with it: fail cleanly, no leaked internal string, no crash. Not claiming this fix also somehow fixed Ollama's latency — it didn't, and wasn't supposed to.
 
+### 10. Second Tool/Skill expansion — `list_files`, fuzzy file lookup, and a real matching bug caught and fixed before shipping
+
+Closed another real, demonstrated gap: `read_file`/`write_file` both require already knowing an exact filename, and "File not found" has consistently been the most common permanent Tool/Skill failure this whole session. Added, matching every existing convention:
+
+- **`plugins/file_lister.py`** — `list_files()`, reuses `WORKSPACE_DIR` from `file_reader.py`.
+- **`services/tools/list_files_tool.py`** — `ListFilesTool` (5th Tool), no-argument `InputModel` (empty pydantic model is fine per the base `Tool` contract).
+- **`services/steps/find_file_step.py`** — `FindFileStep`, deterministic fuzzy matching (no LLM). Deliberately named `"filename"` so its output lands in `context['filename']` via `Skill.run()`'s `context[step.name]` mechanism — exactly what the *existing* `ReadFileStep` already expects, reused completely unchanged.
+- **New Skill: `FindAndDigestFileSkill`** (5th Skill) — composes `ListFilesStep` (new) → `FindFileStep` (new) → `ReadFileStep` (existing, reused) → `SummarizeStep` (existing, reused, `source_key="read_file"`).
+- **Wired into the live Planner**: `_build_skill_input()`'s new `find_and_digest_file` branch falls back to the raw prompt as a fuzzy-match candidate when `extract_filename()` finds no dotted word, rather than giving up before `FindFileStep` gets a chance.
+
+**A real bug caught and fixed before calling this done, not after**: the first version of `FindFileStep` only did whole-string `difflib` matching. Unit tests with short, filename-like candidates (`"jazzmusic"`, `"great_wall_china"`) passed fine. But two consecutive **live** `/chat` tests with realistic natural-language prompts (`"Can you find and summarize my great wall notes"`, `"summarize my jazz file for me"`) both failed — the Planner correctly selected the Skill both times (`source: llm`), `list_files` succeeded, but the `filename` step's fuzzy match failed: a whole sentence rarely resembles a single filename by character-sequence similarity, even when a human would immediately see the connection. Root-caused from the logs, not guessed. Fixed by adding a token-level fallback: strip a small set of filler words, compare each remaining word against each filename's stem individually, keep the best-scoring pair.
+
+**Live-verified, before/after the matcher fix, the exact two prompts that failed**:
+
+| prompt | before fix | after fix |
+|---|---|---|
+| `"Can you find and summarize my great wall notes"` | `filename` step failed, escalated (1 attempt, 2.3s) | fully succeeded end-to-end (41.9s), correct on-topic summary |
+| `"summarize my jazz file for me"` | `filename` step failed, escalated (1 attempt, 9.9s) | fully succeeded end-to-end (35.1s), correct on-topic summary |
+
+Both confirmed via `experiences` table (`tool: find_and_digest_file, tool_source: llm, success: true`) and structured logs showing all four steps (`list_files`, `filename`, `read_file`, `summarize`) succeeding in sequence. Also re-confirmed a genuinely unrelated candidate still correctly fails to match (no false positives introduced by the more permissive token-level fallback). DB baseline unchanged throughout (1 project, 3 memory, 25 chats).
+
+**Capability inventory as of this item**: 5 Tools (`code`, `file`, `web`, `write_file`, `list_files`), 5 Skills (`research_topic`, `file_digest`, `calculate_and_explain`, `research_and_save_file`, `find_and_digest_file`).
+
 ## What's already right — keep these
 
 - **Registry-driven decision prompt** (E1) — the actual architectural upgrade. Resist ever hardcoding tool/skill names back into a decision prompt; if a 4th capability needs special-casing in `planning_service.py`, something's wrong with that capability's `description`, not with the Planner.
@@ -183,6 +206,7 @@ Two of five still fail — both are messier strings that wouldn't actually occur
 - **`experiences.tool_source`** is the one reliable signal for "did the live LLM actually get used" — response text alone degrades too gracefully to tell. Check it, don't guess from the reply, whenever verifying live-LLM behavior specifically.
 - **Compose existing Steps into a new Skill rather than writing new logic** — `ResearchAndSaveFileSkill` reused `WebSearchStep`/`SummarizeStep` unchanged and only added the one genuinely new piece (`WriteFileStep`). Check for an existing Step first; a new Skill duplicating an existing Step's logic is a design smell, not a shortcut.
 - **A bare `except Exception: return None` can hide a completely broken integration, not just "no results this time."** The Wikipedia fallback's first version silently ate a 403 on every single call. When a fallback/secondary path keeps returning "nothing," test the raw call directly before trusting the wrapped function's return value — don't assume "no results" means the query was the problem.
+- **Unit tests with clean, short, filename-like inputs aren't enough for anything that will actually receive natural language.** `FindFileStep`'s first version passed every unit test (`"jazzmusic"`, `"great_wall_china"`) but failed twice live on realistic full-sentence prompts. Test with the messy input a real user would actually type, not just the clean input that's easy to write a test for.
 
 ## Known gaps
 
@@ -201,7 +225,7 @@ Two of five still fail — both are messier strings that wouldn't actually occur
 
 ## Immediate next action
 
-Enter the SSH key's passphrase locally (`ssh-add ~/.ssh/id_ed25519` in your own terminal, not through this session) and push `origin/main` — 6 commits are waiting. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Commit and push the second Tool/Skill expansion (`list_files`, `find_and_digest_file` — item 10, currently uncommitted). Enter the SSH key's passphrase locally (`ssh-add ~/.ssh/id_ed25519` in your own terminal, not through this session) and push `origin/main` — 7+ commits will be waiting. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 

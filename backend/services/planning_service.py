@@ -113,6 +113,18 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
             return None
         return {"filename": filename, "project_id": project_id}
 
+    if capability_name == "find_and_digest_file":
+        # No project_id needed — unlike file_digest, this Skill doesn't
+        # save to memory (see FindAndDigestFileSkill's docstring for why
+        # it exists: file_digest fails outright on any filename mismatch,
+        # this one fuzzy-matches). Deliberately more tolerant than
+        # file_digest's own input-building here too: falls back to the
+        # raw prompt as the fuzzy-match candidate when extract_filename()
+        # finds no dotted word, instead of returning None and giving up
+        # before FindFileStep even gets a chance to try.
+        candidate = extract_filename(prompt) or prompt
+        return {"candidate_filename": candidate}
+
     if capability_name == "calculate_and_explain":
         try:
             code = generate_code(prompt)

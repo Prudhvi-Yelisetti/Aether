@@ -14,6 +14,7 @@ from services.skills.research_topic_skill import ResearchTopicSkill
 from services.skills.file_digest_skill import FileDigestSkill
 from services.skills.calculate_and_explain_skill import CalculateAndExplainSkill
 from services.skills.research_and_save_file_skill import ResearchAndSaveFileSkill
+from services.skills.find_and_digest_file_skill import FindAndDigestFileSkill
 
 
 class SkillRegistry:
@@ -45,3 +46,4 @@ registry.register(ResearchTopicSkill())
 registry.register(FileDigestSkill())
 registry.register(CalculateAndExplainSkill())
 registry.register(ResearchAndSaveFileSkill())
+registry.register(FindAndDigestFileSkill())

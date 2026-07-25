@@ -13,6 +13,7 @@ from services.tools.code_tool import CodeTool
 from services.tools.file_tool import FileTool
 from services.tools.web_tool import WebTool
 from services.tools.write_file_tool import WriteFileTool
+from services.tools.list_files_tool import ListFilesTool
 
 
 class ToolRegistry:
@@ -39,3 +40,4 @@ registry.register(CodeTool())
 registry.register(FileTool())
 registry.register(WebTool())
 registry.register(WriteFileTool())
+registry.register(ListFilesTool())
