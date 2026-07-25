@@ -223,9 +223,28 @@ Both confirmed via `experiences` table (`tool: find_and_digest_file, tool_source
 
 **SSH push**: rather than repeat "no SSH access this session" again, actually investigated. Found a real, valid SSH key on the machine — the failure isn't a missing/broken key, it's that no `ssh-agent` is running in this shell to hold the unlocked key. Attempted `ssh-add`, hit the (correct, expected) passphrase prompt, and stopped there — did not ask for or accept a passphrase through this session, since that's a secret that shouldn't transit through a chat. Cleanly killed the empty agent afterward. **The fix is one command in Prudhvi's own terminal**: `ssh-add ~/.ssh/id_ed25519`, enter the passphrase locally, then `git push origin main` works normally from that machine.
 
+### 11. Frontend verified live — a real CORS bug found and fixed, first end-to-end proof through the actual UI
+
+The frontend (`frontend/src/App.js`) hadn't been touched since well before Phase A — this session finally checked whether it still worked, rather than assuming.
+
+**Contract check first**: all 4 routes it calls (`POST /project`, `GET /projects`, `GET /project/{id}/chats`, `POST /chat`) still exist unchanged; response shapes in `main.py`/`project_store.py` still match exactly what the frontend expects. One genuine gap surfaced along the way: every single live test this whole session had omitted `project_id` (testing capability selection in isolation) — meaning none of Phase E1–E3 or either Tool/Skill expansion had ever been exercised through the actual project-scoped flow the real frontend uses.
+
+**Real bug found on the very first page load**: the browser console showed genuine CORS errors. Root cause — the frontend hardcodes `http://127.0.0.1:8000`, and this dev machine runs a second, unrelated project (`stud-os`) on port 8000. The fetch calls were hitting *that* project's server, which has no CORS headers for this origin — not a flaw in Aether's own CORS config (already permissive, `allow_origins=["*"]`).
+
+**Fixed properly, not just worked around**: introduced `API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000"`, used in all 6 `fetch()` calls. Defaults to the original hardcoded value — normal single-project usage is unchanged; this only helps when a port conflict (local or deployed) needs the API location changed without a source edit.
+
+**Live-verified via a real browser, driven by actual clicks and typing (Playwright), not curl**:
+- Projects list loaded correctly (the real `"test"` project from the DB).
+- Clicking into it loaded real chat history (3 chats) with visible memory recall across turns.
+- Typed and sent a brand-new message (`"What is the capital of Sweden?"`) through the actual UI — got back `"Stockholm"`, confirmed correct via backend logs (`plan_decided, source: llm`) and the DB (`experiences` row `success: true`, new row in `chats` under the right `chat_id`).
+
+**This is the first time this whole session's backend work — Planner, Validator, Decision, both Tool/Skill expansions — was exercised through the real UI rather than curl.** Confirms none of it broke frontend compatibility. Committed as `16dc738` (includes incidental `package-lock.json` churn from running `npm install` in this environment — a transitive optional peer dependency resolved slightly differently, unrelated to the actual fix).
+
+**Not checked**: whether a production build (`npm run build`) works cleanly, and whether the UI reflects any of the new capabilities conceptually (it has no notion of Tools/Skills/Validation/Decision — it just renders whatever string comes back as `response`, which happens to work fine since even escalation messages are plain readable text).
+
 ## Immediate next action
 
-Commit and push the second Tool/Skill expansion (`list_files`, `find_and_digest_file` — item 10, currently uncommitted). Enter the SSH key's passphrase locally (`ssh-add ~/.ssh/id_ed25519` in your own terminal, not through this session) and push `origin/main` — 7+ commits will be waiting. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Confirm the second Tool/Skill expansion (item 10, `list_files`/`find_and_digest_file`) and the frontend fix (item 11, already committed as `16dc738`) are both committed — check `git status`. Enter the SSH key's passphrase locally (`ssh-add ~/.ssh/id_ed25519` in your own terminal, not through this session) and push `origin/main` — 9+ commits will be waiting. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 
