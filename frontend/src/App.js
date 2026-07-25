@@ -1,5 +1,13 @@
 import { useState, useEffect } from "react";
 
+// Configurable via REACT_APP_API_URL so a local port conflict (or a
+// deployed backend) doesn't require editing source — found needing this
+// live, 2026-07-25: this machine also runs a second, unrelated project
+// on port 8000, and Aether's backend has to run on a different port
+// whenever both are up at once. Defaults to the original hardcoded
+// value, so normal single-project usage is unchanged.
+const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
+
 function App() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
@@ -13,7 +21,7 @@ function App() {
 
   // -------- Fetch Projects --------
   const fetchProjects = async () => {
-    const res = await fetch("http://127.0.0.1:8000/projects");
+    const res = await fetch(`${API_URL}/projects`);
     const data = await res.json();
     setProjects(data);
   };
@@ -27,7 +35,7 @@ function App() {
     const name = window.prompt("Enter project name:");
     if (!name) return;
 
-    const res = await fetch("http://127.0.0.1:8000/project", {
+    const res = await fetch(`${API_URL}/project`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -49,7 +57,7 @@ function App() {
   const loadProject = async (projectId) => {
     setCurrentProject(projectId);
 
-    const res = await fetch(`http://127.0.0.1:8000/project/${projectId}/chats`);
+    const res = await fetch(`${API_URL}/project/${projectId}/chats`);
     const data = await res.json();
 
     const chatIds = Object.keys(data);
@@ -68,7 +76,7 @@ function App() {
   const loadChat = async (projectId, chatId) => {
     setCurrentChat(chatId);
 
-    const res = await fetch(`http://127.0.0.1:8000/project/${projectId}/chats`);
+    const res = await fetch(`${API_URL}/project/${projectId}/chats`);
     const data = await res.json();
 
     const chatData = data[chatId] || [];
@@ -93,7 +101,7 @@ function App() {
     setMessages(prev => [...prev, userMessage]);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/chat", {
+      const res = await fetch(`${API_URL}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
