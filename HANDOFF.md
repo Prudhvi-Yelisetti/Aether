@@ -6,12 +6,11 @@ Prudhvi is building Aether: a chatbot MVP evolving toward an AI Operating System
 
 ## Status
 
-**Phases A through E3 are implemented and fully complete.** A 4th Tool (`write_file`) and 4th Skill (`research_and_save_file`) were added and live-verified end-to-end (a real prompt now produces a real file). A pre-existing DuckDuckGo/query-extraction fragility that expansion surfaced was found and fixed the same day.
+**Phases A through E3 are implemented and fully complete.** A 4th Tool (`write_file`) and 4th Skill (`research_and_save_file`) were added and live-verified end-to-end (a real prompt now produces a real file). A pre-existing DuckDuckGo/query-extraction fragility that expansion surfaced was found and fixed the same day. The model-name duplication that caused this session's biggest bug is now centralized into one place.
 
-**Push status, precisely** (this session never got working SSH access to `origin`):
+**Push status, precisely** (this session diagnosed but could not resolve SSH access):
 - `ebf40a3`, `62002a9` — confirmed pushed by Prudhvi
-- `5196af7`, `8e65c28`, `1880557`, `df2463b` (Tool/Skill expansion, item 8) — committed locally, **push not confirmed**
-- The DuckDuckGo/query-extraction fix (item 9) — **not yet committed**, see "Uncommitted changes" below
+- `5196af7`, `8e65c28`, `1880557`, `df2463b`, `8f0bf13`, `18b2d8c` — committed locally, **push not confirmed**. A real SSH key exists on the machine; it just needs its passphrase entered locally (`ssh-add ~/.ssh/id_ed25519`, run by Prudhvi, not through this session) before `git push origin main` will work. Working tree is otherwise clean — nothing uncommitted right now.
 
 Completed phases (see `ROADMAP.md` for full checklists, `STATUS.md` for verification details on each item):
 - **Phase A** — security: pooled SQLAlchemy DB, removed `eval()`, `bwrap`-sandboxed code execution, allowlisted file reads, Alembic migrations, structured logging + request IDs
@@ -45,22 +44,13 @@ Completed phases (see `ROADMAP.md` for full checklists, `STATUS.md` for verifica
 
 9. **DuckDuckGo + query-extraction fragility, fixed same day.** Root-caused item 8's finding: DuckDuckGo's Instant Answer API does narrow exact-topic keying, and `extract_search_query()`'s LLM-extracted phrasing (e.g. `"Great Wall of China research"`) often didn't match it even though the raw topic (`"the Great Wall of China"`) did. This affects the *original* `research_topic` Skill identically, not just the new one. Fixed two things: tightened `extract_search_query()`'s prompt to preserve original topic wording and forbid added filler words (3 of 4 test prompts now extract cleanly); added a genuine second data source to `web_search.py` — a Wikipedia OpenSearch + summary fallback for when DDG returns nothing, since OpenSearch is far more forgiving of imperfect phrasing. **Caught a real bug in the fallback's own first version**: Wikipedia's API returns 403 without a `User-Agent` header, silently swallowed by a bare `except`, so the fallback looked "empty" rather than "broken" — found by testing the raw HTTP call directly, not trusting the wrapped function. Fixed, re-verified. **Full live proof**: the exact prompt that failed 100% of the time in item 8 now has `web_search` succeed on 3 consecutive live `/chat` attempts, and the 3rd fully completed end-to-end — real file, real content, on disk.
 
+10. **Model name centralized; SSH push properly diagnosed.** The bug in item 1 was possible because the model name was hardcoded independently in 7 files rather than defined once — closed it, all 7 now import `FAST_MODEL`/`STRONG_MODEL` from `routing.py`. No circular imports, confirmed zero hardcoded model-name strings remain elsewhere. Live-verified with a full `/chat` request after the refactor, not just a clean import. Separately, investigated the SSH push failure instead of just re-reporting it: found a real, valid key on the machine — the issue is no `ssh-agent` running, not a missing/broken key. Attempted `ssh-add`, hit the (correct) passphrase prompt, and stopped there rather than asking for or accepting a passphrase through this session. The fix is one command in Prudhvi's own terminal.
+
 Full detail, including every `experiences` table row and every live test across the whole session, is in `STATUS.md` — read that, not just this summary, before treating any of this as settled.
 
 ## Uncommitted changes (as of this handoff)
 
-Confirmed pushed to `origin/main`: `ebf40a3`, `62002a9`.
-
-Committed locally, **push not yet confirmed** (no working SSH access this session):
-- `5196af7` — E3's retry backoff
-- `8e65c28` — E2's LLM-based validation
-- `1880557` — deletion of dead `services/router.py`
-- `df2463b` — Tool/Skill expansion (item 8): `write_file` Tool/Step/plugin, `ResearchAndSaveFileSkill`, all wiring
-
-**Not yet committed at all** — the DuckDuckGo/query-extraction fix (item 9):
-- `services/extraction.py` — `extract_search_query()`'s tightened prompt
-- `plugins/web_search.py` — Wikipedia OpenSearch + summary fallback, `User-Agent` header fix
-- `STATUS.md`, `ROADMAP.md`, this file — updated with all of the above
+Nothing — working tree is clean. Everything through item 10 above is committed locally as `18b2d8c` (HEAD). Only the push to `origin/main` is outstanding — see "Push status" above for the precise, diagnosed reason and the one-command fix.
 
 Local DB baseline (verified clean throughout): 1 project, 3 memory rows, 25 chats unchanged across every test this session and every prior one.
 
@@ -81,7 +71,7 @@ Local DB baseline (verified clean throughout): 1 project, 3 memory rows, 25 chat
 
 ## Relevant files & artifacts
 
-- `~/Projects/Aether` — the repo (local, git-tracked; `origin/main` confirmed to include `ebf40a3`, `62002a9`; three more commits + two feature branches of uncommitted work sit on top, see above)
+- `~/Projects/Aether` — the repo (local, git-tracked; `origin/main` confirmed to include `ebf40a3`, `62002a9`; 6 more commits sit on top locally, working tree otherwise clean, see "Push status" above)
 - `ARCHITECTURE.md` — target AIOS vision, mapped against current code, gap-by-gap
 - `STATUS.md` — current state, resolved items with live-verification notes, known gaps — **read this first**
 - `ROADMAP.md` — phased checklist, dependency-ordered, checkboxes reflect actual completion
@@ -90,7 +80,7 @@ Local DB baseline (verified clean throughout): 1 project, 3 memory rows, 25 chat
 
 ## Next steps
 
-1. **Commit and push everything** listed under "Uncommitted changes" — confirm the three earlier commits actually reached `origin/main` too, this session never could verify.
+1. **Run `ssh-add ~/.ssh/id_ed25519` locally, then `git push origin main`.** Nothing is uncommitted — this is the only remaining step to get all 6 pending commits onto GitHub.
 2. Decide direction for what's next (Prudhvi's call):
    - Run `llm_validate: true` on real traffic before considering enforcement
    - Keep expanding the Tool/Skill set

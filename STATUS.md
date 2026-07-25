@@ -10,7 +10,7 @@ _Last updated: July 24, 2026, after settling E1's live-LLM latency variance, shi
 |---|---|
 | Vision | Aether AI Operating System (AIOS) — see `ARCHITECTURE.md` |
 | Current state | **Phase A + B + C + D complete. E0 + E1 complete and live-verified. E2 (both increments) and E3 (with backoff) all live and proven. 4th Tool (`write_file`) and 4th Skill (`research_and_save_file`) added and live-verified, including a full end-to-end pass that produces a real file. DuckDuckGo/query-extraction fragility found and fixed the same day.** |
-| Commits | `ebf40a3`, `62002a9` — pushed to `origin/main` (confirmed by Prudhvi). `5196af7`, `8e65c28`, `1880557`, `df2463b` (item 7, Tool/Skill expansion) — committed locally, **push not yet confirmed**; no working SSH access this session. **Uncommitted on top of those**: the DuckDuckGo/query-extraction fix (item 8) only. |
+| Commits | `ebf40a3`, `62002a9` — pushed to `origin/main` (confirmed by Prudhvi). `5196af7`, `8e65c28`, `1880557`, `df2463b`, `8f0bf13`, `18b2d8c` — committed locally, **push not yet confirmed**; SSH key exists but needs its passphrase entered locally (`ssh-add`) — diagnosed, not fixable from this session. Working tree clean, nothing uncommitted right now. |
 | Local usage | 1 project, 3 memory rows, 25 chats — verified intact through every migration and test run across all sessions |
 | Critical blockers | 0 |
 | Next phase | Run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set — Prudhvi's call |
@@ -186,16 +186,22 @@ Two of five still fail — both are messier strings that wouldn't actually occur
 
 ## Known gaps
 
-- Model name is a hardcoded pair (`qwen3.5:9b` / `qwen3-coder:latest`) duplicated across 7 files rather than defined once. Worth centralizing into `routing.py`'s constants and importing everywhere — the model-name bug was made possible by there being 7 places to get it wrong instead of one.
 - `think` hardcoded off everywhere via a default parameter. Fine for now; revisit only if answer quality on hard questions becomes a real concern, with the same live-proof discipline.
 - `RETRY_DELAY_SECONDS = 2.0` is a guess, not a measured value — chosen as "long enough to plausibly clear a brief restart, short enough not to hurt perceived latency," never validated against a real outage's actual duration. Revisit with real data if it matters.
 - `validate_response_llm()` is observability-only by design — no decision in the codebase currently acts on `llm_validation_flagged`. Whether/when to promote it to actually gate delivery or trigger a retry is an open, deliberate decision, not an oversight — see "Immediate next action."
 - `Tool` and `Skill` objects still lack the AI Object Model's full metadata (`Identifier`/`Version`/`Owner`/`Trust Level`/`History`/`Permissions`) the way `Step` now has via `ScriptMeta`. Not urgent until governance (Phase F+) needs it.
 - Even with both DuckDuckGo/query-extraction fixes, web search still isn't 100% reliable — very messy or unusual phrasing can still fail both DDG and the Wikipedia fallback (see item 8's table). Real, honest residual limit, not a regression; worth another pass only if it shows up as a recurring problem in practice, not preemptively.
+- Push to `origin/main` needs a passphrase entered locally (`ssh-add ~/.ssh/id_ed25519`) — diagnosed precisely this session, not something further sessions can fix remotely. See item 9's writeup below.
+
+### 9. Model name centralized, SSH push properly diagnosed
+
+**Model name**: the bug in item 1 was possible because the model name was hardcoded independently in 7 different files rather than defined once — flagged as a known gap ever since. Closed it: all 7 files (`ollama_service.py`, `reasoning_service.py` ×2, `plugin_manager.py` ×3, `memory_extraction.py`, `summarize_step.py`, `extraction.py` ×2, `planning_service.py`) now import `FAST_MODEL`/`STRONG_MODEL` from `routing.py` instead of repeating the string. No circular imports (`routing.py` only imports `logging_config`, a leaf module). Confirmed zero hardcoded model-name strings remain anywhere outside `routing.py` itself. **Live-verified**, not just an import-cleanly check: full `/chat` request after the refactor — `tool_source: llm`, `success: true`, correct answer, matching DB row.
+
+**SSH push**: rather than repeat "no SSH access this session" again, actually investigated. Found a real, valid SSH key on the machine — the failure isn't a missing/broken key, it's that no `ssh-agent` is running in this shell to hold the unlocked key. Attempted `ssh-add`, hit the (correct, expected) passphrase prompt, and stopped there — did not ask for or accept a passphrase through this session, since that's a secret that shouldn't transit through a chat. Cleanly killed the empty agent afterward. **The fix is one command in Prudhvi's own terminal**: `ssh-add ~/.ssh/id_ed25519`, enter the passphrase locally, then `git push origin main` works normally from that machine.
 
 ## Immediate next action
 
-Commit and push the DuckDuckGo/query-extraction fix (`extraction.py`'s tightened prompt, `web_search.py`'s Wikipedia fallback + `User-Agent` fix) — currently uncommitted. (The Tool/Skill expansion from item 7 is already committed as `df2463b`, separate from this.) Confirm `5196af7`, `8e65c28`, `1880557`, and `df2463b` actually reached `origin/main` — still not confirmed from this session, no working SSH access. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Enter the SSH key's passphrase locally (`ssh-add ~/.ssh/id_ed25519` in your own terminal, not through this session) and push `origin/main` — 6 commits are waiting. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 
