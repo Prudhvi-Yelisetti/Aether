@@ -242,9 +242,11 @@ The frontend (`frontend/src/App.js`) hadn't been touched since well before Phase
 
 **Not checked**: whether a production build (`npm run build`) works cleanly, and whether the UI reflects any of the new capabilities conceptually (it has no notion of Tools/Skills/Validation/Decision — it just renders whatever string comes back as `response`, which happens to work fine since even escalation messages are plain readable text).
 
+*(Resolved same session: `npm run build` compiles cleanly (Node 26 + `react-scripts` 5 — no OpenSSL or other version friction). Confirmed `REACT_APP_API_URL` is correctly baked in at build time, matching Create React App's documented convention: building without it set produces the expected `ERR_CONNECTION_REFUSED` to the fallback port (proving nothing silently swallows the misconfiguration); rebuilding with it set and serving the output (`npx serve -s build`) loads with zero console errors and the real project data, confirmed via a live browser check, not just a successful build exit code.)*
+
 ## Immediate next action
 
-Confirm the second Tool/Skill expansion (item 10, `list_files`/`find_and_digest_file`) and the frontend fix (item 11, already committed as `16dc738`) are both committed — check `git status`. Enter the SSH key's passphrase locally (`ssh-add ~/.ssh/id_ed25519` in your own terminal, not through this session) and push `origin/main` — 9+ commits will be waiting. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
+Enter the SSH key's passphrase locally (`ssh-add ~/.ssh/id_ed25519` in your own terminal, not through this session) and push `origin/main` — everything through `ac09fe4` is committed and waiting. Then decide: run `llm_validate` on real traffic before considering enforcement, or keep expanding the Skill/Tool set. See `HANDOFF.md` for the full session-transition brief.
 
 ## Earlier phases (condensed — see git history for full detail)
 
