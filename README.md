@@ -13,6 +13,18 @@ A local-first open-source AI workspace with smart model routing.
 - Backend: FastAPI
 - Models: Ollama
 
+## Running locally
+
+```bash
+./run.sh
+```
+
+Starts Ollama (if it isn't already running), the backend, and the frontend
+dev server together, with output printed to the terminal. Press Ctrl+C to
+stop everything the script started. See the comments at the top of
+`run.sh` for the details it handles automatically (port conflicts, first-run
+`npm install`, etc.).
+
 ## Vision
 
 Aether's long-term goal is an AI Operating System (AIOS): a kernel of reusable
