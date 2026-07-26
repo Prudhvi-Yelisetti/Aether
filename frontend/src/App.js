@@ -122,9 +122,20 @@ function App() {
         setChatList(prev => [...prev, data.chat_id]);
       }
 
+      // model_used was already returned by /chat all along but silently
+      // discarded here — surfacing it now. Only set for freshly-sent
+      // messages in this session; /project/{id}/chats doesn't return
+      // `model` per message (even though the DB has it), so historical
+      // messages loaded via loadChat() won't have this and simply won't
+      // show a subtitle — deliberately smaller in scope than also
+      // extending that endpoint.
       setMessages(prev => [
         ...prev,
-        { role: "ai", text: data.response || data.error || "No response" }
+        {
+          role: "ai",
+          text: data.response || data.error || "No response",
+          model: data.model_used || null
+        }
       ]);
 
     } catch (err) {
@@ -234,6 +245,11 @@ function App() {
               }}>
                 {msg.text}
               </span>
+              {msg.model && (
+                <div style={{ fontSize: "11px", color: "gray", marginTop: "2px" }}>
+                  {msg.model}
+                </div>
+              )}
             </div>
           ))}
         </div>
