@@ -12,6 +12,8 @@ from services.routing import select_model
 from services.planning_service import plan, execute_plan
 from services.decision_service import decide
 from services.validation_service import validate_response_llm
+from services.tools.registry import registry as tool_registry
+from services.skills.registry import registry as skill_registry
 from storage.project_store import (
     create_project,
     get_projects,
@@ -96,6 +98,18 @@ class ProjectRequest(BaseModel):
 @app.get("/")
 def home():
     return {"message": "Aether backend running 🚀"}
+
+
+@app.get("/capabilities")
+def list_capabilities():
+    """What Aether can actually do right now, straight from the same
+    registries the Planner itself queries (services/tools/registry.py,
+    services/skills/registry.py) — not a hand-maintained list that can
+    drift from what's really registered."""
+    return {
+        "tools": tool_registry.describe_all(),
+        "skills": skill_registry.describe_all(),
+    }
 
 
 # -------- Project Routes --------
@@ -227,5 +241,15 @@ def chat(request: ChatRequest):
         "mode": mode,
         "model_used": model,
         "chat_id": chat_id,
-        "response": response
+        "response": response,
+        # Exposed 2026-07-26: main.py always computed all of this
+        # (the_plan, decision) but never returned it — the frontend had
+        # no way to show which capability actually handled a request,
+        # even though the Planner/Validator/Decision layers (E1-E3) are
+        # the whole point of this project. See STATUS.md.
+        "capability_type": the_plan.capability_type,
+        "capability_name": the_plan.capability_name,
+        "capability_source": the_plan.source,
+        "attempts": decision.attempts,
+        "escalated": decision.escalated,
     }
