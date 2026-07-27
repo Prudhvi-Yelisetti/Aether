@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
-
-// Configurable via REACT_APP_API_URL so a local port conflict (or a
-// deployed backend) doesn't require editing source — found needing this
-// live, 2026-07-25: this machine also runs a second, unrelated project
-// on port 8000, and Aether's backend has to run on a different port
-// whenever both are up at once. Defaults to the original hardcoded
-// value, so normal single-project usage is unchanged.
-const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
+import Sidebar from "./components/Sidebar";
+import ChatWindow from "./components/ChatWindow";
+import CapabilitiesPanel from "./components/CapabilitiesPanel";
+import {
+  fetchProjects,
+  createProject as apiCreateProject,
+  fetchProjectChats,
+  sendChatMessage,
+} from "./api";
+import "./App.css";
 
 function App() {
   const [input, setInput] = useState("");
@@ -19,47 +21,45 @@ function App() {
   const [chatList, setChatList] = useState([]);
   const [currentChat, setCurrentChat] = useState(null);
 
-  // -------- Fetch Projects --------
-  const fetchProjects = async () => {
-    const res = await fetch(`${API_URL}/projects`);
-    const data = await res.json();
-    setProjects(data);
+  const [showCapabilities, setShowCapabilities] = useState(false);
+
+  const refreshProjects = async () => {
+    setProjects(await fetchProjects());
   };
 
   useEffect(() => {
-    fetchProjects();
+    refreshProjects();
   }, []);
 
-  // -------- Create Project --------
-  const createProject = async () => {
-    const name = window.prompt("Enter project name:");
+  const handleCreateProject = async () => {
+    const name = window.prompt("Project name:");
     if (!name) return;
 
-    const res = await fetch(`${API_URL}/project`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ name })
-    });
-
-    const data = await res.json();
-
+    const data = await apiCreateProject(name);
     if (data.error) {
       alert(data.error);
       return;
     }
-
-    fetchProjects();
+    refreshProjects();
   };
 
-  // -------- Load Project --------
+  const loadChat = async (projectId, chatId) => {
+    setCurrentChat(chatId);
+    const data = await fetchProjectChats(projectId);
+    const chatData = data[chatId] || [];
+
+    const formatted = [];
+    chatData.forEach((msg) => {
+      formatted.push({ role: "user", text: msg.prompt });
+      formatted.push({ role: "ai", text: msg.response });
+    });
+    setMessages(formatted);
+  };
+
   const loadProject = async (projectId) => {
     setCurrentProject(projectId);
 
-    const res = await fetch(`${API_URL}/project/${projectId}/chats`);
-    const data = await res.json();
-
+    const data = await fetchProjectChats(projectId);
     const chatIds = Object.keys(data);
 
     setChatList(chatIds);
@@ -72,204 +72,81 @@ function App() {
     }
   };
 
-  // -------- Load Chat --------
-  const loadChat = async (projectId, chatId) => {
-    setCurrentChat(chatId);
-
-    const res = await fetch(`${API_URL}/project/${projectId}/chats`);
-    const data = await res.json();
-
-    const chatData = data[chatId] || [];
-
-    const formatted = [];
-
-    chatData.forEach(msg => {
-      formatted.push({ role: "user", text: msg.prompt });
-      formatted.push({ role: "ai", text: msg.response });
-    });
-
-    setMessages(formatted);
+  const handleNewChat = () => {
+    setCurrentChat(null);
+    setMessages([]);
   };
 
-  // -------- Send Message --------
   const sendMessage = async () => {
     if (!input.trim() || loading || !currentProject) return;
 
     setLoading(true);
-
-    const userMessage = { role: "user", text: input };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, { role: "user", text: input }]);
+    const sentInput = input;
+    setInput("");
 
     try {
-      const res = await fetch(`${API_URL}/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          prompt: input,
-          mode: "smart",
-          project_id: currentProject,
-          chat_id: currentChat
-        })
+      const data = await sendChatMessage({
+        prompt: sentInput,
+        mode: "smart",
+        projectId: currentProject,
+        chatId: currentChat,
       });
 
-      const data = await res.json();
-
-      // If new chat, register it
       if (!currentChat && data.chat_id) {
         setCurrentChat(data.chat_id);
-        setChatList(prev => [...prev, data.chat_id]);
+        setChatList((prev) => [...prev, data.chat_id]);
       }
 
-      // model_used was already returned by /chat all along but silently
-      // discarded here — surfacing it now. Only set for freshly-sent
-      // messages in this session; /project/{id}/chats doesn't return
-      // `model` per message (even though the DB has it), so historical
-      // messages loaded via loadChat() won't have this and simply won't
-      // show a subtitle — deliberately smaller in scope than also
-      // extending that endpoint.
-      setMessages(prev => [
+      setMessages((prev) => [
         ...prev,
         {
           role: "ai",
           text: data.response || data.error || "No response",
-          model: data.model_used || null
-        }
+          model: data.model_used || null,
+          capabilityType: data.capability_type || null,
+          capabilityName: data.capability_name || null,
+          capabilitySource: data.capability_source || null,
+          attempts: data.attempts || 1,
+          escalated: !!data.escalated,
+        },
       ]);
-
     } catch (err) {
-      setMessages(prev => [
+      setMessages((prev) => [
         ...prev,
-        { role: "ai", text: "Error: Unable to fetch response" }
+        { role: "ai", text: "Error: couldn't reach the backend." },
       ]);
     }
 
-    setInput("");
     setLoading(false);
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div className="app-shell">
+      <Sidebar
+        projects={projects}
+        currentProject={currentProject}
+        onSelectProject={loadProject}
+        onCreateProject={handleCreateProject}
+        chatList={chatList}
+        currentChat={currentChat}
+        onSelectChat={(id) => loadChat(currentProject, id)}
+        onNewChat={handleNewChat}
+        onOpenCapabilities={() => setShowCapabilities(true)}
+      />
 
-      {/* -------- Sidebar -------- */}
-      <div style={{
-        width: "260px",
-        borderRight: "1px solid #ccc",
-        padding: "10px"
-      }}>
-        <h3>Projects</h3>
+      <ChatWindow
+        messages={messages}
+        input={input}
+        setInput={setInput}
+        onSend={sendMessage}
+        loading={loading}
+        currentProject={currentProject}
+      />
 
-        <button onClick={createProject}>+ New Project</button>
-
-        {Object.entries(projects).map(([id, proj]) => (
-          <div key={id} style={{ marginTop: "10px" }}>
-
-            {/* Project */}
-            <div
-              onClick={() => loadProject(id)}
-              style={{
-                padding: "8px",
-                cursor: "pointer",
-                fontWeight: "bold",
-                backgroundColor: currentProject === id ? "#ddd" : "transparent"
-              }}
-            >
-              📁 {proj.name}
-            </div>
-
-            {/* Chats under project */}
-            {currentProject === id && (
-              <div style={{ marginLeft: "10px" }}>
-
-                <button
-                  onClick={() => {
-                    setCurrentChat(null);
-                    setMessages([]);
-                  }}
-                >
-                  + New Chat
-                </button>
-
-                {chatList.map(chatId => (
-                  <div
-                    key={chatId}
-                    onClick={() => loadChat(id, chatId)}
-                    style={{
-                      padding: "5px",
-                      cursor: "pointer",
-                      backgroundColor: currentChat === chatId ? "#bbb" : "transparent"
-                    }}
-                  >
-                    💬 Chat {chatId}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* -------- Chat Area -------- */}
-      <div style={{ flex: 1, padding: "20px", maxWidth: "800px", margin: "auto" }}>
-        <h1>Aether</h1>
-
-        {!currentProject && (
-          <p style={{ color: "gray" }}>
-            Select or create a project to start chatting
-          </p>
-        )}
-
-        {/* Messages */}
-        <div style={{
-          border: "1px solid #ccc",
-          height: "400px",
-          overflowY: "auto",
-          padding: "10px",
-          marginBottom: "10px"
-        }}>
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              style={{
-                textAlign: msg.role === "user" ? "right" : "left",
-                margin: "10px 0"
-              }}
-            >
-              <span style={{
-                display: "inline-block",
-                padding: "10px",
-                borderRadius: "10px",
-                backgroundColor: msg.role === "user" ? "#007bff" : "#e5e5ea",
-                color: msg.role === "user" ? "white" : "black"
-              }}>
-                {msg.text}
-              </span>
-              {msg.model && (
-                <div style={{ fontSize: "11px", color: "gray", marginTop: "2px" }}>
-                  {msg.model}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Input */}
-        <textarea
-          rows="3"
-          style={{ width: "100%" }}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={loading || !currentProject}
-        />
-
-        <br /><br />
-
-        <button onClick={sendMessage} disabled={loading || !currentProject}>
-          {loading ? "Thinking..." : "Send"}
-        </button>
-      </div>
-
+      {showCapabilities && (
+        <CapabilitiesPanel onClose={() => setShowCapabilities(false)} />
+      )}
     </div>
   );
 }

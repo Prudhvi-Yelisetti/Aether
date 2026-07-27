@@ -1,13 +1,80 @@
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* ============================================================
+   Aether design tokens
+   ------------------------------------------------------------
+   Concept: Aether is a kernel of composable intelligence
+   services (Plan -> Capability -> Validate -> Deliver). The UI
+   reads like an instrument panel for something technical and
+   alive, not a chat-app template. Monospace is reserved for
+   system/capability labels (identifiers like
+   skill:research_topic, qwen3.5:9b); the humanist sans is for
+   actual conversation content — that split is content-driven,
+   not decorative.
+   ============================================================ */
+
+:root {
+  /* Deep graphite-blue, not pure black or the generic cream/
+     terracotta default. Cyan for "system" state; amber/coral
+     are distinct so retry vs. escalation carry real meaning
+     rather than everything just being red. */
+  --bg: #0f1419;
+  --surface: #161d27;
+  --surface-raised: #1c2530;
+  --border: #242e3a;
+  --border-subtle: #1a222c;
+
+  --text: #e8edf2;
+  --text-muted: #8b98a8;
+  --text-faint: #5b6674;
+
+  --accent: #5eb3d6;
+  --accent-dim: #3d7a94;
+  --success: #4a9d7f;
+  --warning: #d6a15e;
+  --danger: #d67878;
+
+  --user-bubble: #2a3542;
+  --ai-bubble: #1a222c;
+
+  --font-sans: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  height: 100%;
+}
+
+#root { height: 100vh; }
+
+::selection { background: var(--accent-dim); color: var(--text); }
+
+button, input, textarea { font-family: inherit; }
+
+/* Visible keyboard focus everywhere, never suppressed */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
