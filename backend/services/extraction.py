@@ -90,3 +90,29 @@ Rules:
 Request: {prompt}
 """
     return generate_strict(code_prompt, model=STRONG_MODEL)
+
+
+def extract_write_content(prompt: str) -> str:
+    """Uses generate_strict() — same reasoning as extract_search_query():
+    feeds an automated next step (WriteFileTool), not something a human
+    reads directly.
+
+    Added 2026-07-27: found live, via a real prompt through the actual
+    UI ("List the files in the workspace"), that a directly-selected
+    tool:write_file or tool:list_files (not routed through a Skill) fell
+    through execute_plugin()'s hardcoded if/elif chain and silently
+    returned None — that dispatcher predates both tools and was never
+    updated for them. This function is part of that fix: gives
+    execute_plugin()'s new write_file branch a way to pull the actual
+    content to write out of the request, the same way it already pulls
+    a search query or generated code."""
+    content_prompt = f"""
+Extract only the exact text content the user wants written to a file,
+from this request. Do not include the filename, instructions, or any
+commentary — only the content itself.
+
+Return ONLY that content, nothing else.
+
+Request: {prompt}
+"""
+    return generate_strict(content_prompt, model=FAST_MODEL).strip()

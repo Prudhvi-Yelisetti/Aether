@@ -1,5 +1,11 @@
 from services.reasoning_service import generate, generate_strict, ReasoningError
-from services.extraction import extract_filename, extract_search_query, generate_code
+from services.extraction import (
+    extract_filename,
+    extract_search_query,
+    extract_write_content,
+    generate_code,
+    slugify_filename,
+)
 from services.tools.registry import registry
 from services.routing import FAST_MODEL
 import ast
@@ -170,5 +176,26 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
             model=FAST_MODEL
         )
         return summary
+
+    # -------- WRITE_FILE TOOL --------
+    # Added 2026-07-27: found live, via a real prompt through the actual
+    # UI, that this branch never existed — execute_plugin() predates
+    # write_file/list_files entirely and silently returned None for both,
+    # which surfaced as an "empty_response" escalation with no useful
+    # error. See STATUS.md.
+    elif plugin_name == "write_file":
+        filename = extract_filename(prompt) or slugify_filename(prompt)
+        try:
+            content = extract_write_content(prompt)
+        except ReasoningError as e:
+            return f"Could not determine what to write: {e}"
+
+        result = tool.execute(tool.InputModel(filename=filename, content=content))
+        return result.output
+
+    # -------- LIST_FILES TOOL --------
+    elif plugin_name == "list_files":
+        result = tool.execute(tool.InputModel())
+        return result.output
 
     return None
