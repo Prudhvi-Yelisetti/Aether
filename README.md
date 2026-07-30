@@ -1,15 +1,24 @@
 # Aether
 
-A local-first open-source AI workspace with smart model routing.
+A local-first open-source AI workspace with smart model routing and a visible
+Plan → Capability → Validate → Deliver pipeline for every response.
 
 ## Features (MVP)
-- Chat interface
-- Project-based organization
-- Local AI via Ollama
-- Basic model routing
+- Chat interface with project-based organization and per-project memory
+- Local AI via Ollama, with automatic model routing
+- A Planner that picks between Tools (single-step actions), Skills
+  (multi-step sequences), or raw reasoning — registry-driven, not keyword
+  matching, so new capabilities are automatically selectable
+- 5 Tools (code execution, file read/write/list, web search) and 5 Skills
+  (research + save, file digest, fuzzy file lookup, calculate + explain)
+- Validation and bounded retry/escalation before a response is ever
+  delivered — no internal error strings leak to the user
+- The UI shows which capability actually handled each response (e.g.
+  `plan·llm → skill:research_and_save_file → qwen3.5:9b → ok`), plus a
+  Capabilities panel listing everything Aether can currently do
 
 ## Tech Stack
-- Frontend: React (planned)
+- Frontend: React
 - Backend: FastAPI
 - Models: Ollama
 

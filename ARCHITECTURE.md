@@ -17,33 +17,39 @@ Full kernel service list (target): Planning, Coordinator, Reasoning, Tool, Step,
 
 ## Current reality (this repo)
 
-A single-process FastAPI chatbot. No bus, no planner, no governance, no versioned objects. Every "service" folder name in `backend/services/` is a Python module, not an independent, addressable kernel service.
+A single-process FastAPI chatbot with several real kernel services built and
+live-verified (Tool, Skill, Planning, Validator, Decision, Experience — see
+`STATUS.md` for the full history of how each landed, including bugs found
+and fixed along the way). Still no Intent Bus, no Governance, no versioned
+AI Objects for anything but Steps — every "service" is a Python module
+communicating via direct function calls, not an independently addressable
+kernel service.
 
 ## Mapping: target service → current equivalent → gap
 
 | Target Service | Current Equivalent | Gap |
 |---|---|---|
-| **Tool Service** | `plugins/` (code_runner, file_reader, web_search) + `plugin_manager.py` | No formal tool contract (input/output schema). No sandboxing. Selection logic duplicated with the router. |
-| **Reasoning Service** | `ollama_service.py` | Single provider (Ollama), hardcoded. No model abstraction layer, no prompt compression, no structured output parsing. |
-| **Planning Service** | None | `main.py` hardcodes the execution path (route → maybe-plugin → generate). No planner decides *what* should happen — it's an if/else chain. |
-| **Coordinator** | `main.py` route handler | No dependency management, no retry, no multi-step execution. Every request is one linear function call. |
-| **Memory Service** | `project_store.py` (`memory` table) | Flat key/value, string-matched extraction, no dedup, no typing. |
-| **Knowledge Service** | None | No distinction between "facts about the user" and "reusable general knowledge." |
-| **Experience Service** | None | No structured record of what happened/why/what was learned per execution. |
-| **Validator Service** | None | No validation step exists between generation and delivery. |
-| **Decision Service** | None | Result is always delivered; no retry/replan/escalate logic. |
-| **Governance Service** | None | Nothing is versioned; nothing requires approval. |
-| **Evolution / Distillation** | None | The system does not improve itself from execution. |
-| **Cost Engine** | None | No token/latency/success-rate tracking. |
-| **Project Brain** | Partial — `project_id` scoping exists in the data model | Only holds chats + flat memory, not Knowledge/Skills/Workflows/Experiences/Decisions. |
+| **Tool Service** | `services/tools/` — formal contract (`base.py`: name, description, pydantic `InputModel`, `execute()`), `ToolRegistry`, 5 Tools (`code`, `file`, `write_file`, `list_files`, `web`) | Real sandboxing exists for code execution (`bwrap`) and file access (path allowlisting), but Tools still lack the AI Object Model's full metadata (Identifier/Version/Owner/Trust Level/History/Permissions) that Steps have via `ScriptMeta`. |
+| **Reasoning Service** | `services/reasoning_service.py` — single entry point every caller goes through (`generate()`/`generate_strict()`) | Still single provider (Ollama), hardcoded. No model abstraction layer for swapping providers, no prompt compression, no structured output parsing beyond ad-hoc string parsing. |
+| **Planning Service** | `services/planning_service.py` — a real Planner, registry-driven (`ToolRegistry.describe_all()` + `SkillRegistry.describe_all()` build the decision prompt dynamically, not hardcoded), with a graceful degradation chain (LLM decision → rule-based fallback → raw reasoning) | No multi-step planning yet — one request gets one capability selection, not a plan spanning multiple Tools/Skills. |
+| **Coordinator** | `main.py`'s `/chat` route, delegating to Planning → Validation → Decision | Still one linear function call per request; no dependency management or multi-step execution graph. |
+| **Memory Service** | `project_store.py` (`memory` table) + `services/memory_extraction.py` — LLM-based extraction with real upsert semantics (one row per key, not append-only) | Flat key/value, no typing, no distinction from Knowledge. |
+| **Knowledge Service** | None | No distinction between "facts about the user" (Memory) and reusable general knowledge. |
+| **Experience Service** | `experiences` table + `step_metrics` table — structured record of what happened (capability chosen, source, success, latency) per request and per Step | Still low volume; nothing yet consumes this data to change future behavior (that's Evolution/Distillation, not built). |
+| **Validator Service** | `services/validation_service.py` — deterministic failure-string/empty-output checks (live, gates delivery) + `validate_response_llm()` (LLM-based, opt-in, observability-only pending a monitoring period) | LLM-based validation doesn't gate anything yet — deliberate, not an oversight. |
+| **Decision Service** | `services/decision_service.py` — bounded retry (with backoff) or escalate to a clear message, based on the Validator's retryable/permanent classification | No replan (retrying the identical capability only); no escalation path beyond a clear message back to the user (no human-in-the-loop, no alerting). |
+| **Governance Service** | None | Nothing is versioned except Steps (`ScriptMeta`); nothing requires approval. |
+| **Evolution / Distillation** | None | The system does not improve itself from Experience data yet. |
+| **Cost Engine** | Partial — `experiences.latency_ms` tracked | No token counting, no cost tracking, no success-rate-driven routing decisions. |
+| **Project Brain** | Partial — `project_id` scoping on chats + memory | Only holds chats + flat memory, not Knowledge/Skills/Workflows/Experiences/Decisions per project. |
 | **Intent Bus** | None | Subsystems call each other's functions directly (tight coupling), not via structured messages. |
-| **AI Object Model (immutable, versioned)** | None | All data is mutable SQL rows. No versioning, no object identity beyond DB primary keys. |
+| **AI Object Model (immutable, versioned)** | Partial — Steps have `ScriptMeta` (versioned identity, history) | Tools and Skills still lack this; everything else is mutable SQL rows with no object identity beyond DB primary keys. |
 
 ## Why this gap matters for how we build
 
-- **Do not build Governance, Planning, or the Intent Bus yet.** They have nothing meaningful to govern, plan, or route between until Tool/Skill/Memory/Experience are solid. Building them now produces bureaucracy with no substance underneath.
-- **The Tool Service is the correct next investment**, because it's the one target service with a genuine, working precursor already in the repo (`plugin_manager.py`). Formalizing it (contracts, registry, safe execution) is the highest-leverage next step.
-- **Model independence should be designed in now**, even though only Ollama is used today — every direct call to `ollama_service.generate_response` should eventually go through one Reasoning Service entry point, so swapping or adding a provider later doesn't mean touching every caller.
-- **Immutability and versioning are a data-layer decision, not a later refactor.** Retrofitting versioned objects onto live mutable SQL rows is expensive. Once Skills/Steps/Workflows are introduced (Phase 4+ in `ROADMAP.md`), those objects should be versioned from day one even while the rest of the system stays on plain SQL.
+- **Governance, the Intent Bus, Evolution, and Distillation are still correctly not built** — they have nothing meaningful to govern, route between, or learn from yet in enough volume. `experiences`/`step_metrics` exist and are accumulating real data, but nothing consumes it to change behavior; that's the actual prerequisite for Evolution, not just "having a table."
+- **Planning → Validation → Decision (E1–E3) are the real, load-bearing addition since this doc was last accurate.** Every request now goes through a genuine capability-selection → validate → retry-or-escalate pipeline, live-verified end to end, including through the actual UI (see `STATUS.md`'s later entries) — not a stub or a plan, a working thing with real bugs found and fixed in it.
+- **Model independence is still not designed in** — every Reasoning Service call still assumes Ollama specifically (model names, the `think` parameter, timeout handling are all Ollama-API-shaped). Worth doing before a second provider is ever actually needed, not preemptively.
+- **Immutability and versioning remains a data-layer decision, not a later refactor.** Steps got this early and it's held up well (`ScriptMeta`); Tools and Skills still don't have it, and retrofitting it once there's real usage data referencing them will be more expensive than doing it now — a real, flagged known gap, not forgotten.
 
-See `ROADMAP.md` for the phase-by-phase path from current reality to this target.
+See `ROADMAP.md` for the phase-by-phase path from current reality to this target, and `STATUS.md` for the live-verified evidence behind every "done" claim above.
