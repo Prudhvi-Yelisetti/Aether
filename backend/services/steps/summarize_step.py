@@ -28,13 +28,18 @@ class SummarizeStep(Step):
     description = "Summarizes the content at context[source_key] into plain language."
     script = ScriptMeta(
         step_id="step.summarize",
-        version="1.1.0",
+        version="1.2.0",
         owner="prudhvi",
         history=(
             "1.0.0: initial implementation, hardcoded to read context['web_search'], Phase D",
             "1.1.0: source_key made configurable so FileDigestSkill and "
             "CalculateAndExplainSkill could reuse this Step after a different "
             "predecessor, instead of duplicating it",
+            "1.2.0: optional context['question'] grounds the explain prompt "
+            "with the original request -- fixes calculate_and_explain "
+            "explaining bare numeric output with no idea what it means "
+            "(found live via llm_validate eval traffic, STATUS.md item 13). "
+            "No-op for any caller that doesn't set context['question'].",
         ),
     )
 
@@ -46,8 +51,27 @@ class SummarizeStep(Step):
         if not raw_text:
             return StepResult(success=False, error=f"context['{self.source_key}'] is required")
 
+        # Bug found live 2026-07-31 via llm_validate eval traffic (see
+        # STATUS.md item 13): calculate_and_explain's raw_text is bare
+        # code output ("Output:\n36.0\n") with no indication of what
+        # question it answers -- "Explain this simply: Output:\n36.0\n"
+        # left the model with nothing to explain, so it asked the user
+        # for context instead of just answering. research_topic's web
+        # search results and file_digest's file content are both
+        # self-describing text, so this never surfaced there.
+        #
+        # context['question'] is optional and unused by every existing
+        # caller except CalculateAndExplainSkill (via
+        # planning_service.py's _build_skill_input) -- when absent,
+        # behavior is byte-for-byte the same prompt as before.
+        question = context.get("question")
+        if question:
+            prompt = f"Question: {question}\n\nResult: {raw_text}\n\nExplain the result simply, in the context of the question."
+        else:
+            prompt = f"Explain this simply:\n{raw_text}"
+
         try:
-            summary = generate_strict(f"Explain this simply:\n{raw_text}", model=FAST_MODEL)
+            summary = generate_strict(prompt, model=FAST_MODEL)
             return StepResult(success=True, output=summary)
         except ReasoningError as e:
             return StepResult(success=False, error=str(e))

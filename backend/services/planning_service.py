@@ -142,7 +142,11 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
             code = generate_code(prompt)
         except ReasoningError:
             return None
-        return {"code": code}
+        # question grounds SummarizeStep's explain prompt with the
+        # original request (see summarize_step.py 1.2.0) -- without it,
+        # the explain step only sees bare code output like "Output:\n36.0\n"
+        # with no idea what question it answers.
+        return {"code": code, "question": prompt}
 
     return None
 
