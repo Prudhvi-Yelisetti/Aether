@@ -99,11 +99,23 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
     if capability_name == "research_and_save_file":
         # No project_id needed — this Skill saves to a file in the
         # workspace, not project memory (see research_topic above for the
-        # memory-writing equivalent). filename is deterministic
-        # (slugify_filename), not another LLM call — matches
-        # extract_filename()'s "this is parsing, not reasoning" rationale.
+        # memory-writing equivalent). filename is deterministic, not
+        # another LLM call — matches extract_filename()'s "this is
+        # parsing, not reasoning" rationale.
+        #
+        # Bug found live 2026-07-31 via llm_validate eval traffic (see
+        # STATUS.md): this always called slugify_filename(query),
+        # ignoring any filename the user actually typed — "research the
+        # Eiffel Tower and save a summary to eiffel_summary.txt" silently
+        # saved as eiffel_tower.txt instead. file_digest and
+        # find_and_digest_file below both already call
+        # extract_filename(prompt) first for exactly this reason; this
+        # branch just never did. Same fix here: prefer an explicit
+        # filename in the prompt, fall back to the slugified query only
+        # when the user didn't name one.
         query = extract_search_query(prompt)
-        return {"query": query, "filename": slugify_filename(query)}
+        filename = extract_filename(prompt) or slugify_filename(query)
+        return {"query": query, "filename": filename}
 
     if capability_name == "file_digest":
         if not project_id:
@@ -183,6 +195,28 @@ def plan(prompt: str, project_id: str | None = None) -> Plan:
     return Plan(capability_type="skill", capability_name=capability_name, input=built_input, source="llm")
 
 
+def _coerce_skill_output(output):
+    # Crash found live 2026-07-31 via llm_validate eval traffic (see
+    # STATUS.md): SaveMemoryStep's StepResult.output is a dict
+    # (key/value pair) -- structured data for internal use, not
+    # human-facing text like WriteFileStep's "Saved to X (Y bytes)."
+    # string. Any Skill ending in SaveMemoryStep (file_digest,
+    # research_topic) returned that raw dict as the chat response,
+    # which crashed validate_response()'s response.strip() with an
+    # AttributeError -- a 500 on every such request, not just a bad
+    # answer. Step output shapes aren't uniformly human-facing text,
+    # so this boundary -- not each Step, and not validate_response()
+    # -- is the right place to bridge that: it is the one spot that
+    # already knows both "this is a Skill's final output" and "this
+    # has to become a string for the chat response."
+    if isinstance(output, dict):
+        key = output.get("key", "memory")
+        return "Saved to memory under '" + str(key) + "'."
+    if output is None:
+        return "Done."
+    return str(output)
+
+
 def execute_plan(p: Plan, prompt: str, request_id: str | None = None) -> str | None:
     """Returns the human-facing response string for tool/skill plans, or
     None for a reasoning plan — the caller (main.py) handles reasoning
@@ -199,7 +233,8 @@ def execute_plan(p: Plan, prompt: str, request_id: str | None = None) -> str | N
 
         if result.success:
             last_step_name = skill.steps[-1].name
-            return result.context.get(last_step_name, "Done.")
+            output = result.context.get(last_step_name, "Done.")
+            return _coerce_skill_output(output)
 
         return f"Couldn't complete this: {result.error}"
 
