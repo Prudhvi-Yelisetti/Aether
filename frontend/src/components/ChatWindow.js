@@ -7,6 +7,8 @@ export default function ChatWindow({
   onSend,
   loading,
   currentProject,
+  llmValidate,
+  setLlmValidate,
 }) {
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -53,6 +55,7 @@ export default function ChatWindow({
                     model={msg.model}
                     attempts={msg.attempts}
                     escalated={msg.escalated}
+                    llmValidation={msg.llmValidation}
                   />
                 )}
               </div>
@@ -78,9 +81,24 @@ export default function ChatWindow({
               onKeyDown={handleKeyDown}
               disabled={loading}
             />
-            <button className="composer-send" onClick={onSend} disabled={loading || !input.trim()}>
-              {loading ? "..." : "Send"}
-            </button>
+            <div className="composer-actions">
+              {/* llm_validate is opt-in and observability-only (see
+                  validation_service.py's docstring, STATUS.md item 13) —
+                  off by default since it's an extra LLM call on top of
+                  generation, and hasn't been proven reliable enough to
+                  run on every request yet. Exposed here 2026-07-31. */}
+              <label className="toggle-validate" title="Ask a second LLM call to judge whether the response actually addresses the question. Extra latency; logged only, doesn't change what's delivered.">
+                <input
+                  type="checkbox"
+                  checked={llmValidate}
+                  onChange={(e) => setLlmValidate(e.target.checked)}
+                />
+                validate
+              </label>
+              <button className="composer-send" onClick={onSend} disabled={loading || !input.trim()}>
+                {loading ? "..." : "Send"}
+              </button>
+            </div>
           </div>
         </>
       )}

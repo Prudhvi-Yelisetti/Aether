@@ -280,7 +280,6 @@
 .composer-input::placeholder { color: var(--text-faint); }
 
 .composer-send {
-  align-self: flex-end;
   background: var(--accent);
   color: var(--bg);
   border: none;
@@ -298,6 +297,31 @@
   background: var(--surface-raised);
   color: var(--text-faint);
   cursor: not-allowed;
+}
+
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.toggle-validate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.toggle-validate input {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 /* ============================================================
@@ -387,6 +411,90 @@
   font-size: 11px;
   color: var(--text-faint);
 }
+
+/* Memory values can be long (a saved research/digest summary) — wrap
+   rather than overflow the panel, unlike capability-item-desc's normal
+   short one-line descriptions. */
+.memory-value {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ============================================================
+   New Project modal — replaces window.prompt(), see
+   NewProjectModal.js. Reuses .panel-overlay/.panel from the
+   Capabilities/Memory panels above rather than a one-off style.
+   ============================================================ */
+.panel-narrow {
+  width: 360px;
+}
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin-bottom: var(--space-2);
+}
+
+.field-input {
+  width: 100%;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: var(--space-3);
+  font-size: 14px;
+}
+
+.field-input:focus {
+  border-color: var(--accent-dim);
+  outline: none;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: var(--space-2) 0 0;
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.btn-primary:hover:not(:disabled) { opacity: 0.85; }
+.btn-primary:disabled {
+  background: var(--surface-raised);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--text); }
 
 /* ============================================================
    Responsive

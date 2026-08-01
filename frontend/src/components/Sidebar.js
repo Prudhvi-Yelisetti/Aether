@@ -8,6 +8,7 @@ export default function Sidebar({
   onSelectChat,
   onNewChat,
   onOpenCapabilities,
+  onOpenMemory,
 }) {
   return (
     <aside className="sidebar">
@@ -19,6 +20,12 @@ export default function Sidebar({
       <button className="btn-capabilities" onClick={onOpenCapabilities}>
         ⌘ Capabilities
       </button>
+
+      {currentProject && (
+        <button className="btn-capabilities" onClick={onOpenMemory}>
+          ⌘ Memory
+        </button>
+      )}
 
       <div className="sidebar-section">
         <div className="sidebar-section-header">

@@ -17,6 +17,7 @@ export default function CapabilityTrace({
   model,
   attempts,
   escalated,
+  llmValidation,
 }) {
   if (!capabilityType) return null;
 
@@ -47,6 +48,26 @@ export default function CapabilityTrace({
       )}
       <span className="trace-arrow">→</span>
       <span className={outcomeClass}>{outcomeLabel}</span>
+      {/* llm_validate is opt-in and observability-only (see
+          validation_service.py) — only render this chip when it
+          actually ran, not a static "not run" placeholder on every
+          message, which would just be noise for the vast majority of
+          requests that don't use it. */}
+      {llmValidation && (
+        <>
+          <span className="trace-arrow">→</span>
+          <span
+            className={
+              llmValidation === "valid"
+                ? "trace-chip trace-outcome-ok"
+                : "trace-chip trace-outcome-escalated"
+            }
+            title="Opt-in LLM-based validation (llm_validate) — observability-only, does not affect delivery"
+          >
+            llm·{llmValidation}
+          </span>
+        </>
+      )}
     </div>
   );
 }

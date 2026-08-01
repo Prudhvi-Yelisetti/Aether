@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import ChatWindow from "./components/ChatWindow";
 import CapabilitiesPanel from "./components/CapabilitiesPanel";
+import MemoryPanel from "./components/MemoryPanel";
+import NewProjectModal from "./components/NewProjectModal";
 import {
   fetchProjects,
   createProject as apiCreateProject,
@@ -22,6 +24,9 @@ function App() {
   const [currentChat, setCurrentChat] = useState(null);
 
   const [showCapabilities, setShowCapabilities] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [llmValidate, setLlmValidate] = useState(false);
 
   const refreshProjects = async () => {
     setProjects(await fetchProjects());
@@ -31,16 +36,15 @@ function App() {
     refreshProjects();
   }, []);
 
-  const handleCreateProject = async () => {
-    const name = window.prompt("Project name:");
-    if (!name) return;
-
+  // Returns the API result so NewProjectModal can show an inline error
+  // (e.g. duplicate name) without closing — replaces the old
+  // window.prompt() + alert() flow, see NewProjectModal.js.
+  const handleCreateProject = async (name) => {
     const data = await apiCreateProject(name);
-    if (data.error) {
-      alert(data.error);
-      return;
+    if (!data.error) {
+      refreshProjects();
     }
-    refreshProjects();
+    return data;
   };
 
   const loadChat = async (projectId, chatId) => {
@@ -51,7 +55,22 @@ function App() {
     const formatted = [];
     chatData.forEach((msg) => {
       formatted.push({ role: "user", text: msg.prompt });
-      formatted.push({ role: "ai", text: msg.response });
+      // Historical capability trace — added 2026-07-31 (migration
+      // 44f9e98b07f2). Rows written before that migration have these
+      // as null, which CapabilityTrace already renders as "no trace,"
+      // same as a fresh message with no capabilityType — no special
+      // casing needed here for old vs. new rows.
+      formatted.push({
+        role: "ai",
+        text: msg.response,
+        model: msg.model || null,
+        capabilityType: msg.capability_type || null,
+        capabilityName: msg.capability_name || null,
+        capabilitySource: msg.capability_source || null,
+        attempts: msg.attempts || 1,
+        escalated: !!msg.escalated,
+        llmValidation: msg.llm_validation || null,
+      });
     });
     setMessages(formatted);
   };
@@ -91,6 +110,7 @@ function App() {
         mode: "smart",
         projectId: currentProject,
         chatId: currentChat,
+        llmValidate,
       });
 
       if (!currentChat && data.chat_id) {
@@ -109,6 +129,7 @@ function App() {
           capabilitySource: data.capability_source || null,
           attempts: data.attempts || 1,
           escalated: !!data.escalated,
+          llmValidation: data.llm_validation || null,
         },
       ]);
     } catch (err) {
@@ -127,12 +148,13 @@ function App() {
         projects={projects}
         currentProject={currentProject}
         onSelectProject={loadProject}
-        onCreateProject={handleCreateProject}
+        onCreateProject={() => setShowNewProject(true)}
         chatList={chatList}
         currentChat={currentChat}
         onSelectChat={(id) => loadChat(currentProject, id)}
         onNewChat={handleNewChat}
         onOpenCapabilities={() => setShowCapabilities(true)}
+        onOpenMemory={() => setShowMemory(true)}
       />
 
       <ChatWindow
@@ -142,10 +164,23 @@ function App() {
         onSend={sendMessage}
         loading={loading}
         currentProject={currentProject}
+        llmValidate={llmValidate}
+        setLlmValidate={setLlmValidate}
       />
 
       {showCapabilities && (
         <CapabilitiesPanel onClose={() => setShowCapabilities(false)} />
+      )}
+
+      {showMemory && currentProject && (
+        <MemoryPanel projectId={currentProject} onClose={() => setShowMemory(false)} />
+      )}
+
+      {showNewProject && (
+        <NewProjectModal
+          onCreate={handleCreateProject}
+          onClose={() => setShowNewProject(false)}
+        />
       )}
     </div>
   );

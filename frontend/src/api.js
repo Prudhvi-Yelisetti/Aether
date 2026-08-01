@@ -23,6 +23,11 @@ export async function fetchProjectChats(projectId) {
   return res.json();
 }
 
+export async function fetchProjectMemory(projectId) {
+  const res = await fetch(`${API_URL}/project/${projectId}/memory`);
+  return res.json();
+}
+
 export async function fetchCapabilities() {
   const res = await fetch(`${API_URL}/capabilities`);
   return res.json();
