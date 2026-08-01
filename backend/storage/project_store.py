@@ -98,6 +98,15 @@ def add_chat(project_id: str, chat_id: int, chat: dict):
             prompt=chat["prompt"],
             response=chat["response"],
             model=chat["model"],
+            # Optional — see 44f9e98b07f2. main.py always passes these
+            # now, but .get() keeps this function usable from anywhere
+            # that only has the older three fields (tests, scripts).
+            capability_type=chat.get("capability_type"),
+            capability_name=chat.get("capability_name"),
+            capability_source=chat.get("capability_source"),
+            attempts=chat.get("attempts"),
+            escalated=chat.get("escalated"),
+            llm_validation=chat.get("llm_validation"),
         )
         db.add(row)
         db.commit()
@@ -154,15 +163,38 @@ def get_project_full_data(project_id: str):
     db = SessionLocal()
     try:
         rows = (
-            db.query(Chat.chat_id, Chat.prompt, Chat.response)
+            db.query(
+                Chat.chat_id,
+                Chat.prompt,
+                Chat.response,
+                Chat.model,
+                Chat.capability_type,
+                Chat.capability_name,
+                Chat.capability_source,
+                Chat.attempts,
+                Chat.escalated,
+                Chat.llm_validation,
+            )
             .filter(Chat.project_id == project_id)
             .order_by(Chat.id.asc())
             .all()
         )
 
         chats = {}
-        for chat_id, prompt, response in rows:
-            chats.setdefault(chat_id, []).append({"prompt": prompt, "response": response})
+        for (chat_id, prompt, response, model, capability_type,
+             capability_name, capability_source, attempts, escalated,
+             llm_validation) in rows:
+            chats.setdefault(chat_id, []).append({
+                "prompt": prompt,
+                "response": response,
+                "model": model,
+                "capability_type": capability_type,
+                "capability_name": capability_name,
+                "capability_source": capability_source,
+                "attempts": attempts,
+                "escalated": escalated,
+                "llm_validation": llm_validation,
+            })
 
         return chats
     finally:

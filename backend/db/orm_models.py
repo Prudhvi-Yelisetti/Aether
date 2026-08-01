@@ -19,6 +19,16 @@ class Chat(Base):
     response = Column(String)
     model = Column(String)
     timestamp = Column(DateTime, server_default=func.now())
+    # Added in 44f9e98b07f2 — see that migration's docstring. All
+    # nullable: rows written before this migration have NULL here, and
+    # the frontend treats a missing capability_type as "no trace to
+    # show" rather than a broken one.
+    capability_type = Column(String, nullable=True)
+    capability_name = Column(String, nullable=True)
+    capability_source = Column(String, nullable=True)
+    attempts = Column(Integer, nullable=True)
+    escalated = Column(Boolean, nullable=True)
+    llm_validation = Column(String, nullable=True)  # "valid" | "flagged" | None (didn't run)
 
 
 class Memory(Base):

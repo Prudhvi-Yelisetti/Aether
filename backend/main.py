@@ -140,6 +140,20 @@ def get_project_chats_api(project_id: str):
     return get_project_full_data(project_id)
 
 
+@app.get("/project/{project_id}/memory")
+def get_project_memory_api(project_id: str):
+    """What's actually stored for this project and injected into every
+    reasoning-path prompt (see ollama_service.py's "Stored context"
+    section) — added 2026-07-31 alongside the fix for memory bleeding
+    into unrelated answers (STATUS.md item 13), so the person using the
+    UI can see the same thing the model sees instead of it being an
+    invisible backend detail."""
+    if not project_exists(project_id):
+        return {"error": "Project not found"}
+
+    return {"memory": [{"key": k, "value": v} for k, v in get_memory(project_id)]}
+
+
 # -------- Chat Route --------
 
 @app.post("/chat")
@@ -209,8 +223,16 @@ def chat(request: ChatRequest):
     # to be a failure string. Logged only; does not change what's
     # delivered or retried this pass — see validate_response_llm()'s
     # docstring for why that's deliberate right now.
+    #
+    # llm_validation_verdict is now also stored (see 44f9e98b07f2) and
+    # returned in the response below — until 2026-07-31 this was
+    # computed and logged, then thrown away, so the UI had no way to
+    # show it even though the whole point of the eval session that found
+    # this (STATUS.md item 13) was to make llm_validate's output visible.
+    llm_validation_verdict = None
     if request.llm_validate and decision.valid:
         llm_validation = validate_response_llm(prompt, response)
+        llm_validation_verdict = "valid" if llm_validation.valid else "flagged"
         if llm_validation.valid:
             logger.info("llm_validation_result", reason=llm_validation.reason)
         else:
@@ -233,7 +255,13 @@ def chat(request: ChatRequest):
         chat_data = {
             "prompt": prompt,
             "response": response,
-            "model": model
+            "model": model,
+            "capability_type": the_plan.capability_type,
+            "capability_name": the_plan.capability_name,
+            "capability_source": the_plan.source,
+            "attempts": decision.attempts,
+            "escalated": decision.escalated,
+            "llm_validation": llm_validation_verdict,
         }
         add_chat(project_id, chat_id, chat_data)
 
@@ -252,4 +280,6 @@ def chat(request: ChatRequest):
         "capability_source": the_plan.source,
         "attempts": decision.attempts,
         "escalated": decision.escalated,
+        # Exposed 2026-07-31 alongside llm_validation_verdict above.
+        "llm_validation": llm_validation_verdict,
     }
