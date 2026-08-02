@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Aether
+Comment=Aether AIOS -- local chat, tools, skills, and memory over Ollama
+Exec=AppRun
+Icon=aether
+Categories=Utility;Development;
+Terminal=true

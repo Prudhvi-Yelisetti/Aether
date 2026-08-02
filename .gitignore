@@ -4,3 +4,6 @@ __pycache__/
 aether.db
 node_modules/
 .env
+frontend/build/
+packaging/appimage/.cache/
+Aether-x86_64.AppImage

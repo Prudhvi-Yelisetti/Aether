@@ -1,0 +1,119 @@
+#!/bin/bash
+# AppRun — Aether launcher.
+#
+# This packages the FastAPI backend + the production React build into one
+# double-clickable app. Ollama is deliberately NOT bundled — its model
+# weights alone are several GB and it's a real system service, not
+# something an AppImage should try to own. This script uses whatever
+# Ollama is already installed on the host, the same way run.sh does for
+# local dev.
+#
+# AppImages mount their contents read-only (a FUSE-mounted squashfs at a
+# fresh random path each run), so nothing here can write inside $HERE at
+# runtime — the SQLite DB and any logs go to a real, writable directory
+# in $HOME instead. See STATUS.md for how the seed DB was generated.
+
+set -u
+
+# $APPDIR is set by the AppImage runtime when actually run as a .AppImage.
+# Fall back to resolving our own location so this also works if someone
+# runs AppRun directly out of the AppDir during testing.
+if [ -n "${APPDIR:-}" ]; then
+    HERE="$APPDIR"
+else
+    HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+fi
+
+DATA_DIR="$HOME/.local/share/Aether"
+PYTHON="$HERE/usr/backend/.venv/bin/python3"
+BACKEND_PORT=8000
+FRONTEND_PORT=3000
+
+mkdir -p "$DATA_DIR"
+
+# ---- seed the DB on first run only — never overwrite existing data ----
+if [ ! -f "$DATA_DIR/aether.db" ]; then
+    cp "$HERE/usr/seed.db" "$DATA_DIR/aether.db"
+    echo "Aether: created a new database at $DATA_DIR/aether.db"
+fi
+
+# ---- port sanity check ----
+# Deliberately not auto-falling-back to another port the way run.sh does
+# for dev (8000 -> 8010): the frontend's REACT_APP_API_URL was baked in
+# at build time as part of `npm run build`, so a runtime port change here
+# wouldn't actually reach the already-built JS bundle. If 8000 is taken
+# (this machine's other project, stud-os, sometimes uses it — see
+# STATUS.md), stop whatever's on it first, or edit BACKEND_PORT above and
+# rebuild the frontend with REACT_APP_API_URL set to match.
+if command -v curl >/dev/null 2>&1 && curl -s -o /dev/null "http://127.0.0.1:$BACKEND_PORT/"; then
+    echo "Aether: something is already answering on port $BACKEND_PORT."
+    echo "        If that's a previous Aether instance, this one will just talk to it."
+    echo "        If it's something else (e.g. stud-os), stop it first and relaunch."
+else
+    # ---- Ollama: use the host's if present, don't bundle it ----
+    if command -v curl >/dev/null 2>&1 && ! curl -s -o /dev/null "http://127.0.0.1:11434/api/tags"; then
+        if command -v ollama >/dev/null 2>&1; then
+            echo "Aether: starting Ollama..."
+            nohup ollama serve > "$DATA_DIR/ollama.log" 2>&1 &
+            OLLAMA_PID=$!
+            for _ in $(seq 1 15); do
+                curl -s -o /dev/null "http://127.0.0.1:11434/api/tags" && break
+                sleep 1
+            done
+        else
+            echo "Aether: Ollama not found on PATH — reasoning/tool features will fail"
+            echo "        until it's installed and running. https://ollama.com"
+        fi
+    fi
+
+    # ---- backend ----
+    echo "Aether: starting backend on port $BACKEND_PORT..."
+    # exec here matters: without it, this subshell forks uvicorn as ITS
+    # OWN child and $! captures the subshell's PID, not uvicorn's — found
+    # live 2026-08-02 by actually testing shutdown, not just startup:
+    # `kill "$BACKEND_PID"` killed the subshell, uvicorn was orphaned and
+    # kept serving. exec replaces the subshell's process image with
+    # uvicorn directly, so $! is the real PID.
+    (cd "$DATA_DIR" && exec "$PYTHON" -m uvicorn main:app \
+        --app-dir "$HERE/usr/backend" \
+        --host 127.0.0.1 --port "$BACKEND_PORT" \
+        > "$DATA_DIR/backend.log" 2>&1) &
+    BACKEND_PID=$!
+
+    for _ in $(seq 1 30); do
+        curl -s -o /dev/null "http://127.0.0.1:$BACKEND_PORT/" && break
+        sleep 1
+    done
+fi
+
+# ---- frontend (static build, served by the same bundled Python) ----
+echo "Aether: starting frontend on port $FRONTEND_PORT..."
+# Same exec reasoning as the backend above.
+(cd "$HERE/usr/frontend-build" && exec "$PYTHON" -m http.server "$FRONTEND_PORT" \
+    --bind 127.0.0.1 > "$DATA_DIR/frontend.log" 2>&1) &
+FRONTEND_PID=$!
+
+for _ in $(seq 1 15); do
+    curl -s -o /dev/null "http://127.0.0.1:$FRONTEND_PORT/" && break
+    sleep 1
+done
+
+cleanup() {
+    echo ""
+    echo "Aether: shutting down..."
+    [ -n "${FRONTEND_PID:-}" ] && kill "$FRONTEND_PID" 2>/dev/null
+    [ -n "${BACKEND_PID:-}" ] && kill "$BACKEND_PID" 2>/dev/null
+    [ -n "${OLLAMA_PID:-}" ] && kill "$OLLAMA_PID" 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
+echo "Aether: ready at http://127.0.0.1:$FRONTEND_PORT"
+if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "http://127.0.0.1:$FRONTEND_PORT" >/dev/null 2>&1 &
+else
+    echo "        (open that URL manually — xdg-open isn't available)"
+fi
+echo "Aether: logs in $DATA_DIR/{backend,frontend,ollama}.log"
+echo "Aether: press Ctrl+C here to stop it."
+
+wait
