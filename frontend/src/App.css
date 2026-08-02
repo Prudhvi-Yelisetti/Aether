@@ -255,6 +255,7 @@
    ============================================================ */
 .composer {
   display: flex;
+  align-items: flex-end;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-8) var(--space-6);
   border-top: 1px solid var(--border);
@@ -301,27 +302,84 @@
 
 .composer-actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: var(--space-2);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
 }
 
+/* Redesigned 2026-08-02 — the checkbox was a bare, unstyled native
+   browser widget (clashing with the rest of the themed UI) stacked
+   ABOVE the Send button in its own column, top-anchored against a tall
+   multi-line textarea — so it visually floated near the top-right
+   corner, disconnected from Send below it, instead of reading as one
+   control cluster. Fixed two ways: composer-actions is now a row, not
+   a column, so both sit side by side bottom-aligned with the textarea;
+   and the checkbox itself is fully custom-drawn (appearance: none) as
+   a small pill/switch matching .trace-chip's visual language, instead
+   of relying on the browser's default checkbox rendering. */
 .toggle-validate {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px var(--space-3);
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
+.toggle-validate:hover {
+  border-color: var(--accent-dim);
+  color: var(--text);
+}
+
+/* The switch itself: a small rounded rail with a sliding thumb, drawn
+   entirely with CSS rather than the native checkbox appearance. */
 .toggle-validate input {
-  accent-color: var(--accent);
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--border);
+  border: none;
   cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.toggle-validate input::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.toggle-validate input:checked {
+  background: var(--accent-dim);
+}
+
+.toggle-validate input:checked::before {
+  transform: translateX(12px);
+  background: var(--accent);
+}
+
+.toggle-validate input:focus-visible {
+  outline: 2px solid var(--accent-dim);
+  outline-offset: 2px;
 }
 
 /* ============================================================
