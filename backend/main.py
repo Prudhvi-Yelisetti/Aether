@@ -1,15 +1,16 @@
 import time
 import uuid
 
+import requests
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 
 from services.logging_config import configure_logging, get_logger
 from services.reasoning_service import generate
-from services.routing import select_model
-from services.planning_service import plan, execute_plan
+from services.routing import select_model, VISION_MODEL
+from services.planning_service import plan, execute_plan, Plan
 from services.decision_service import decide
 from services.validation_service import validate_response_llm
 from services.tools.registry import registry as tool_registry
@@ -87,6 +88,21 @@ class ChatRequest(BaseModel):
     # call on top of the request's own generation, so it's not free, and
     # it hasn't been proven reliable enough to run on every request yet.
     llm_validate: bool = False
+    # Added 2026-08-02 for the Settings panel's model override. None
+    # (the default) means "auto-route via select_model(), same as
+    # always" — this only takes over model choice when the person
+    # explicitly picked one. Ignored outright if images is set (see
+    # below): an attached image forces VISION_MODEL regardless, since
+    # that's the only installed model that can actually see it.
+    model: Optional[str] = None
+    # Added 2026-08-02 for multi-modal support. List of base64-encoded
+    # image strings — no data:image/...;base64, prefix; the frontend
+    # strips that before sending (see api.js). When present, this
+    # request skips Tool/Skill planning entirely and goes straight to
+    # reasoning on VISION_MODEL — none of the current Tools/Skills know
+    # what to do with an image, so routing one into, say,
+    # calculate_and_explain would be nonsensical.
+    images: Optional[List[str]] = None
 
 
 class ProjectRequest(BaseModel):
@@ -110,6 +126,33 @@ def list_capabilities():
         "tools": tool_registry.describe_all(),
         "skills": skill_registry.describe_all(),
     }
+
+
+@app.get("/models")
+def list_models():
+    """Installed Ollama models, straight from Ollama itself (not a
+    hand-maintained list) — added 2026-08-02 for the Settings panel's
+    model override. Same live-queried-not-hardcoded principle as
+    /capabilities above. "vision" in a model's capabilities is what
+    ChatRequest.images actually checks against at request time — this
+    endpoint just surfaces that so the frontend can show it, e.g. to
+    grey out or label non-vision models when an image is attached."""
+    try:
+        resp = requests.get("http://localhost:11434/api/tags", timeout=5)
+        resp.raise_for_status()
+        models = resp.json().get("models", [])
+        return {
+            "models": [
+                {
+                    "name": m.get("name"),
+                    "capabilities": m.get("capabilities", []),
+                }
+                for m in models
+            ]
+        }
+    except requests.exceptions.RequestException:
+        logger.warning("models_unreachable")
+        return {"models": [], "error": "Could not reach Ollama."}
 
 
 # -------- Project Routes --------
@@ -175,7 +218,19 @@ def chat(request: ChatRequest):
         chat_id = create_chat(project_id)
 
     # -------- Model Selection (Reasoning Service's concern, see routing.py) --------
-    model = select_model(prompt, mode)
+    # Added 2026-08-02: an explicit request.model overrides auto-routing
+    # (the Settings panel's model dropdown) — but an attached image wins
+    # over even that override, since VISION_MODEL is the only installed
+    # model that can actually see it. Silently forcing the model here
+    # (rather than erroring on an incompatible model + image combo) is
+    # deliberate: the person just wants their image looked at, not a
+    # 400 explaining why their code-model pick doesn't have eyes.
+    if request.images:
+        model = VISION_MODEL
+    elif request.model:
+        model = request.model
+    else:
+        model = select_model(prompt, mode)
 
     # -------- Fetch Context --------
     history = None
@@ -186,7 +241,17 @@ def chat(request: ChatRequest):
         memory = get_memory(project_id)
 
     # -------- Planning (Tool / Skill / raw reasoning — see planning_service.py) --------
-    the_plan = plan(prompt, project_id)
+    # An attached image skips planning entirely, added 2026-08-02: none
+    # of the current Tools/Skills know what to do with image bytes, so
+    # letting the LLM planner route an image-attached prompt into, say,
+    # calculate_and_explain would be nonsensical rather than just wrong.
+    # Same shape as plan()'s own rule-based short-circuits (e.g.
+    # is_simple_math) — Plan(capability_type="reasoning", ...) is exactly
+    # what a plain reasoning-path response already looks like.
+    if request.images:
+        the_plan = Plan(capability_type="reasoning", capability_name=None, source="rule")
+    else:
+        the_plan = plan(prompt, project_id)
 
     # -------- Generate Response, with Validation + bounded Retry/Escalate --------
     # Phase E2 (validation_service.py) + E3 (decision_service.py): decide()
@@ -196,7 +261,7 @@ def chat(request: ChatRequest):
     # documented in validation_service.py's module docstring.
     def _attempt() -> str:
         if the_plan.capability_type == "reasoning":
-            return generate(prompt, model, history, memory)
+            return generate(prompt, model, history, memory, images=request.images)
         return execute_plan(the_plan, prompt, request_id=request_id)
 
     start = time.monotonic()

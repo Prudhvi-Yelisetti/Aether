@@ -18,7 +18,7 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 REQUEST_TIMEOUT_SECONDS = 60
 
 
-def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory=None, think: bool = False):
+def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory=None, think: bool = False, images=None):
     full_prompt = ""
 
     # -------- SYSTEM INSTRUCTIONS --------
@@ -81,14 +81,27 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory
 
     # -------- CALL OLLAMA --------
     try:
+        payload = {
+            "model": model,
+            "prompt": full_prompt,
+            "stream": False,
+            "think": think,
+        }
+        # Added 2026-08-02 for multi-modal support (see routing.py's
+        # VISION_MODEL, main.py's ChatRequest.images) — Ollama's
+        # /api/generate accepts a top-level "images" field: a list of
+        # base64-encoded strings (no data:image/... prefix — main.py
+        # strips that from what the frontend sends before this call).
+        # Only included when actually present, since sending an empty
+        # list to a non-vision model is a needless payload difference
+        # from before this change for the vast majority of requests
+        # that don't attach an image.
+        if images:
+            payload["images"] = images
+
         response = requests.post(
             OLLAMA_URL,
-            json={
-                "model": model,
-                "prompt": full_prompt,
-                "stream": False,
-                "think": think,
-            },
+            json=payload,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
 

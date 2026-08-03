@@ -36,12 +36,19 @@ def _is_failure_message(text: str) -> bool:
     return isinstance(text, str) and text.startswith(FAILURE_PREFIXES)
 
 
-def generate(prompt: str, model: str = FAST_MODEL, history=None, memory=None) -> str:
+def generate(prompt: str, model: str = FAST_MODEL, history=None, memory=None, images=None) -> str:
     """Graceful variant — returns a human-readable string even on failure.
-    Use this for anything a user will read directly (chat responses)."""
+    Use this for anything a user will read directly (chat responses).
+
+    images (added 2026-08-02): list of base64-encoded strings, no
+    data:image/... prefix — see main.py's ChatRequest.images and
+    routing.py's VISION_MODEL. Only the reasoning path accepts images;
+    generate_strict() below deliberately does not, since every caller of
+    generate_strict() is an internal Step/pipeline call that never has
+    an attached image to begin with."""
     # Provider selection would branch here once a second provider exists —
     # e.g. by model name prefix, or a config flag. Only one provider today.
-    return _ollama_generate(prompt, model=model, history=history, memory=memory)
+    return _ollama_generate(prompt, model=model, history=history, memory=memory, images=images)
 
 
 def generate_strict(prompt: str, model: str = FAST_MODEL, history=None, memory=None) -> str:

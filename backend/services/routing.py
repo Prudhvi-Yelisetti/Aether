@@ -27,6 +27,17 @@ logger = get_logger("aether.routing")
 STRONG_MODEL = "qwen3-coder:latest"
 FAST_MODEL = "qwen3.5:9b"
 
+# Added 2026-08-02 for image-attached requests (main.py) — the only
+# installed model with vision capability, confirmed live via
+# GET /api/tags's "capabilities" field (qwen3-coder and deepseek-r1 both
+# lack it). Equals FAST_MODEL today by coincidence, not by design: kept
+# as its own named constant so a request with an attached image always
+# resolves correctly even if FAST_MODEL is ever repointed to a
+# non-vision model. If more vision-capable models get installed later,
+# this should become a real choice (surfaced via GET /models'
+# capabilities list) rather than a single hardcoded name.
+VISION_MODEL = "qwen3.5:9b"
+
 
 def route_model(prompt: str) -> str:
     prompt_lower = prompt.lower()
