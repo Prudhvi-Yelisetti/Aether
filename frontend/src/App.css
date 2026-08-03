@@ -261,8 +261,18 @@
   border-top: 1px solid var(--border);
 }
 
-.composer-input {
+/* Wraps the textarea + pending-image preview strip, added 2026-08-02 for
+   multi-modal support — flex:1 moved here from .composer-input directly,
+   since this is now the flex child of .composer. */
+.composer-input-wrap {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.composer-input {
+  width: 100%;
   resize: none;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -279,6 +289,80 @@
 }
 
 .composer-input::placeholder { color: var(--text-faint); }
+
+/* Pending image thumbnails, shown above the textarea before sending. */
+.pending-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pending-image {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.pending-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pending-image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  padding: 0;
+  background: rgba(15, 20, 25, 0.85);
+  color: var(--text);
+  border: none;
+  border-radius: 50%;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pending-image-remove:hover { background: var(--danger); }
+
+/* Attach-image button — same visual weight as the validate pill, sits
+   to its left in composer-actions. */
+.composer-attach {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  padding: 6px var(--space-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.composer-attach:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--text); }
+.composer-attach:disabled { color: var(--text-faint); cursor: not-allowed; }
+
+/* Images attached to a sent message, shown inside the bubble above the
+   text. */
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.message-image {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  display: block;
+}
 
 .composer-send {
   background: var(--accent);
@@ -516,6 +600,22 @@
   color: var(--danger);
   font-size: 12px;
   margin: var(--space-2) 0 0;
+}
+
+/* Settings-panel additions, 2026-08-02 */
+.field-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin: var(--space-2) 0 0;
+}
+
+select.field-input {
+  cursor: pointer;
+}
+
+.settings-toggle {
+  display: inline-flex;
+  margin-top: var(--space-5);
 }
 
 .panel-actions {

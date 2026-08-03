@@ -4,6 +4,8 @@ import ChatWindow from "./components/ChatWindow";
 import CapabilitiesPanel from "./components/CapabilitiesPanel";
 import MemoryPanel from "./components/MemoryPanel";
 import NewProjectModal from "./components/NewProjectModal";
+import SettingsPanel from "./components/SettingsPanel";
+import { loadSettings } from "./settings";
 import {
   fetchProjects,
   createProject as apiCreateProject,
@@ -26,7 +28,14 @@ function App() {
   const [showCapabilities, setShowCapabilities] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
-  const [llmValidate, setLlmValidate] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // settings.model/defaultValidate persist across reloads (settings.js,
+  // localStorage) — llmValidate itself stays a live per-message toggle
+  // from here on, just seeded from the persisted default on first load.
+  const [settings, setSettings] = useState(loadSettings);
+  const [llmValidate, setLlmValidate] = useState(() => loadSettings().defaultValidate);
+  const [pendingImages, setPendingImages] = useState([]);
 
   const refreshProjects = async () => {
     setProjects(await fetchProjects());
@@ -97,12 +106,17 @@ function App() {
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || loading || !currentProject) return;
+    if ((!input.trim() && pendingImages.length === 0) || loading || !currentProject) return;
 
     setLoading(true);
-    setMessages((prev) => [...prev, { role: "user", text: input }]);
+    const sentImages = pendingImages;
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: input, images: sentImages.map((img) => img.dataUrl) },
+    ]);
     const sentInput = input;
     setInput("");
+    setPendingImages([]);
 
     try {
       const data = await sendChatMessage({
@@ -111,6 +125,12 @@ function App() {
         projectId: currentProject,
         chatId: currentChat,
         llmValidate,
+        model: settings.model,
+        // Strip the data:image/...;base64, prefix — the backend (and
+        // Ollama's API underneath it) wants raw base64 only. The full
+        // data URL stays in the message above, since that's what the
+        // <img> preview needs.
+        images: sentImages.map((img) => img.dataUrl.split(",")[1]),
       });
 
       if (!currentChat && data.chat_id) {
@@ -155,6 +175,7 @@ function App() {
         onNewChat={handleNewChat}
         onOpenCapabilities={() => setShowCapabilities(true)}
         onOpenMemory={() => setShowMemory(true)}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       <ChatWindow
@@ -166,6 +187,8 @@ function App() {
         currentProject={currentProject}
         llmValidate={llmValidate}
         setLlmValidate={setLlmValidate}
+        pendingImages={pendingImages}
+        setPendingImages={setPendingImages}
       />
 
       {showCapabilities && (
@@ -174,6 +197,13 @@ function App() {
 
       {showMemory && currentProject && (
         <MemoryPanel projectId={currentProject} onClose={() => setShowMemory(false)} />
+      )}
+
+      {showSettings && (
+        <SettingsPanel
+          onSettingsChange={setSettings}
+          onClose={() => setShowSettings(false)}
+        />
       )}
 
       {showNewProject && (

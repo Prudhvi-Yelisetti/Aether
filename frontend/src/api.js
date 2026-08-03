@@ -33,7 +33,12 @@ export async function fetchCapabilities() {
   return res.json();
 }
 
-export async function sendChatMessage({ prompt, mode, projectId, chatId, llmValidate }) {
+export async function fetchModels() {
+  const res = await fetch(`${API_URL}/models`);
+  return res.json();
+}
+
+export async function sendChatMessage({ prompt, mode, projectId, chatId, llmValidate, model, images }) {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -43,6 +48,13 @@ export async function sendChatMessage({ prompt, mode, projectId, chatId, llmVali
       project_id: projectId,
       chat_id: chatId,
       llm_validate: !!llmValidate,
+      // model: undefined/null means "let the backend auto-route", same
+      // as before this existed — only sent when the person picked one
+      // in Settings. images: base64 strings, no data:image/... prefix
+      // (stripped client-side, see ChatWindow.js) — see main.py's
+      // ChatRequest for why an attached image overrides model anyway.
+      model: model || null,
+      images: images && images.length ? images : null,
     }),
   });
   return res.json();

@@ -9,6 +9,7 @@ export default function Sidebar({
   onNewChat,
   onOpenCapabilities,
   onOpenMemory,
+  onOpenSettings,
 }) {
   return (
     <aside className="sidebar">
@@ -26,6 +27,10 @@ export default function Sidebar({
           ⌘ Memory
         </button>
       )}
+
+      <button className="btn-capabilities" onClick={onOpenSettings}>
+        ⌘ Settings
+      </button>
 
       <div className="sidebar-section">
         <div className="sidebar-section-header">
