@@ -136,6 +136,34 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative; /* anchors .drop-overlay below */
+}
+
+/* Drag-and-drop image attach, added 2026-08-03 — see ChatWindow.js */
+.chat-area-drag-active .composer-input,
+.chat-area-drag-active .message-list {
+  opacity: 0.4;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 20, 25, 0.6);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md);
+  margin: var(--space-4);
+  pointer-events: none; /* the drop still lands on .chat-area beneath */
+}
+
+.drop-overlay p {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .empty-state {

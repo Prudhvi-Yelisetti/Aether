@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import CapabilityTrace from "./CapabilityTrace";
 
 export default function ChatWindow({
@@ -14,6 +14,30 @@ export default function ChatWindow({
   setPendingImages,
 }) {
   const fileInputRef = useRef(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  // Counts nested dragenter/dragleave pairs across the drop zone's own
+  // children — a plain boolean flickers false the instant the pointer
+  // crosses a child element's edge, since dragleave fires on the child
+  // before dragenter fires on the parent again.
+  const dragDepth = useRef(0);
+
+  // Added 2026-08-02 for multi-modal support (see main.py's
+  // ChatRequest.images). Stores full data:image/...;base64,xxx URLs
+  // client-side — that's what an <img> tag needs to preview/render
+  // them directly. App.js's sendMessage() strips the data-URL prefix
+  // before sending to the backend, which only wants the raw base64.
+  // Shared by both the file-picker input and drag-and-drop below.
+  const addFiles = (fileList) => {
+    Array.from(fileList || [])
+      .filter((file) => file.type.startsWith("image/"))
+      .forEach((file) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setPendingImages((prev) => [...prev, { name: file.name, dataUrl: reader.result }]);
+        };
+        reader.readAsDataURL(file);
+      });
+  };
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -22,20 +46,8 @@ export default function ChatWindow({
     }
   };
 
-  // Added 2026-08-02 for multi-modal support (see main.py's
-  // ChatRequest.images). Stores full data:image/...;base64,xxx URLs
-  // client-side — that's what an <img> tag needs to preview/render
-  // them directly. App.js's sendMessage() strips the data-URL prefix
-  // before sending to the backend, which only wants the raw base64.
   const handleFilesSelected = (e) => {
-    const files = Array.from(e.target.files || []);
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setPendingImages((prev) => [...prev, { name: file.name, dataUrl: reader.result }]);
-      };
-      reader.readAsDataURL(file);
-    });
+    addFiles(e.target.files);
     e.target.value = ""; // allow re-selecting the same file
   };
 
@@ -43,8 +55,50 @@ export default function ChatWindow({
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Drag-and-drop, added 2026-08-03 after Prudhvi hit a stale Chrome
+  // file-picker cache (real ~/Downloads has 100+ files including many
+  // images; the GTK dialog showed 6 unrelated files, all from months
+  // earlier) — not an Aether bug, but drag-and-drop sidesteps that
+  // native picker entirely, and is worth having regardless.
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDraggingFile(true);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault(); // required for onDrop to fire at all
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setIsDraggingFile(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDraggingFile(false);
+    addFiles(e.dataTransfer.files);
+  };
+
   return (
-    <div className="chat-area">
+    <div
+      className={`chat-area ${isDraggingFile ? "chat-area-drag-active" : ""}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDraggingFile && (
+        <div className="drop-overlay">
+          <p>Drop image to attach</p>
+        </div>
+      )}
       {!currentProject && (
         <div className="empty-state">
           <p className="empty-state-title">Select or create a project</p>
