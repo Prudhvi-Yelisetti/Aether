@@ -21,6 +21,45 @@ export default function ChatWindow({
   // before dragenter fires on the parent again.
   const dragDepth = useRef(0);
 
+  // Real bug found live 2026-08-05 (see STATUS.md): a genuine ~2MB
+  // photo consistently timed out on the backend, even after raising
+  // its timeout (IMAGE_REQUEST_TIMEOUT_SECONDS in ollama_service.py) —
+  // vision inference on a full-resolution image is just slow, and a
+  // longer timeout alone doesn't make it a good experience. Most of
+  // that resolution isn't needed to read text/colors/objects in an
+  // image anyway, so it's downscaled client-side before it ever
+  // becomes a data URL. 1280px on the longest side and JPEG quality
+  // 0.85 are a starting guess, not measured against a quality
+  // threshold — revisit if responses start missing fine detail.
+  const MAX_DIMENSION = 1280;
+  const JPEG_QUALITY = 0.85;
+
+  const downscaleImage = (file) =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const scale = Math.min(1, MAX_DIMENSION / Math.max(img.width, img.height));
+        // Already small enough — skip re-encoding entirely rather than
+        // lose quality (or transparency, PNG->JPEG) for no size benefit.
+        if (scale >= 1) {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+      };
+      img.onerror = reject;
+      img.src = objectUrl;
+    });
+
   // Added 2026-08-02 for multi-modal support (see main.py's
   // ChatRequest.images). Stores full data:image/...;base64,xxx URLs
   // client-side — that's what an <img> tag needs to preview/render
@@ -31,11 +70,20 @@ export default function ChatWindow({
     Array.from(fileList || [])
       .filter((file) => file.type.startsWith("image/"))
       .forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          setPendingImages((prev) => [...prev, { name: file.name, dataUrl: reader.result }]);
-        };
-        reader.readAsDataURL(file);
+        downscaleImage(file)
+          .then((dataUrl) => {
+            setPendingImages((prev) => [...prev, { name: file.name, dataUrl }]);
+          })
+          .catch(() => {
+            // Downscaling failed (corrupt file, unsupported format for
+            // canvas decode, etc.) — fall back to the original bytes
+            // rather than silently dropping the attachment.
+            const reader = new FileReader();
+            reader.onload = () => {
+              setPendingImages((prev) => [...prev, { name: file.name, dataUrl: reader.result }]);
+            };
+            reader.readAsDataURL(file);
+          });
       });
   };
 

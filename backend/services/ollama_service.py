@@ -17,6 +17,19 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 # bigger number. See STATUS.md for the full A/B test.
 REQUEST_TIMEOUT_SECONDS = 60
 
+# Real bug found live 2026-08-05 (see STATUS.md): a genuine, realistic
+# user photo (~2MB PNG) consistently timed out at 60s on both the
+# initial attempt and the retry -- not the "thinking mode left on"
+# problem the comment above already fixed, a real difference in how
+# long vision inference takes on a larger image versus a text-only
+# call. Frontend now downscales images before sending (see
+# ChatWindow.js's downscaleImage()), which should keep most requests
+# well under 60s -- but vision decoding is inherently slower than text
+# generation even on a modest image, so image-attached requests still
+# get a longer ceiling as a safety net, not a substitute for the
+# downscaling fix.
+IMAGE_REQUEST_TIMEOUT_SECONDS = 180
+
 
 def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory=None, think: bool = False, images=None):
     full_prompt = ""
@@ -102,7 +115,7 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory
         response = requests.post(
             OLLAMA_URL,
             json=payload,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=IMAGE_REQUEST_TIMEOUT_SECONDS if images else REQUEST_TIMEOUT_SECONDS,
         )
 
         data = response.json()
@@ -120,8 +133,9 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory
             "Is `ollama serve` running?"
         )
     except requests.exceptions.Timeout:
-        logger.error("ollama_timeout", model=model, timeout=REQUEST_TIMEOUT_SECONDS)
-        return f"Request to {model} timed out after {REQUEST_TIMEOUT_SECONDS}s"
+        actual_timeout = IMAGE_REQUEST_TIMEOUT_SECONDS if images else REQUEST_TIMEOUT_SECONDS
+        logger.error("ollama_timeout", model=model, timeout=actual_timeout)
+        return f"Request to {model} timed out after {actual_timeout}s"
     except Exception as e:
         logger.error("ollama_request_failed", model=model, exc_info=True)
         return f"Request failed: {str(e)}"
