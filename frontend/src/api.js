@@ -38,7 +38,7 @@ export async function fetchModels() {
   return res.json();
 }
 
-export async function sendChatMessage({ prompt, mode, projectId, chatId, llmValidate, model, images }) {
+export async function sendChatMessage({ prompt, mode, projectId, chatId, llmValidate, model, images, files }) {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -55,6 +55,10 @@ export async function sendChatMessage({ prompt, mode, projectId, chatId, llmVali
       // ChatRequest for why an attached image overrides model anyway.
       model: model || null,
       images: images && images.length ? images : null,
+      // files: [{name, content}], plain-text extracted client-side
+      // (see ChatWindow.js's readFileAsText) — main.py's ChatRequest
+      // for why PDF/DOCX aren't supported yet.
+      files: files && files.length ? files : null,
     }),
   });
   return res.json();

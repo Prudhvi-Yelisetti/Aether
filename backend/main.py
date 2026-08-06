@@ -77,6 +77,11 @@ app.add_middleware(
 
 # -------------------- MODELS --------------------
 
+class FileAttachment(BaseModel):
+    name: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     prompt: str
     mode: str = "smart"
@@ -103,6 +108,18 @@ class ChatRequest(BaseModel):
     # what to do with an image, so routing one into, say,
     # calculate_and_explain would be nonsensical.
     images: Optional[List[str]] = None
+    # Added 2026-08-06 after Prudhvi found the composer only accepted
+    # images: plain-text document attachments (.txt/.md/.csv/.json/.log
+    # etc.) — extracted to text client-side (FileReader.readAsText(),
+    # see ChatWindow.js), no server-side parsing needed since it's
+    # already plain text by the time it gets here. PDF/DOCX would need
+    # a real extraction library and is deliberately out of scope for
+    # this pass — see STATUS.md for why. Like images, this skips
+    # Tool/Skill planning (none of them know what to do with inline
+    # file content either) but does NOT force a model override the way
+    # images force VISION_MODEL — any model can read text.
+    files: Optional[List[FileAttachment]] = None
+
 
 
 class ProjectRequest(BaseModel):
@@ -232,6 +249,31 @@ def chat(request: ChatRequest):
     else:
         model = select_model(prompt, mode)
 
+    # -------- File Attachments (text content, see FileAttachment above) --------
+    # Added 2026-08-06. Builds a separate augmented_prompt rather than
+    # mutating `prompt` itself — `prompt` stays exactly what the person
+    # typed for chat storage/display (see add_chat() below); dumping the
+    # full file content into the stored prompt would bloat every
+    # history fetch and show the raw file text in the chat bubble
+    # instead of what was actually typed. Capped at ~50k chars total
+    # across all files, a guess at "enough for a real document without
+    # blowing up a small model's context window" — not measured against
+    # an actual context-length failure yet.
+    MAX_FILE_CONTEXT_CHARS = 50_000
+    augmented_prompt = prompt
+    if request.files:
+        parts = []
+        budget = MAX_FILE_CONTEXT_CHARS
+        for f in request.files:
+            content = f.content[:budget]
+            if len(f.content) > budget:
+                content += "\n[...truncated, file continues...]"
+            parts.append(f"--- Attached file: {f.name} ---\n{content}")
+            budget -= len(content)
+            if budget <= 0:
+                break
+        augmented_prompt = "\n\n".join(parts) + f"\n\n---\n\n{prompt}"
+
     # -------- Fetch Context --------
     history = None
     memory = None
@@ -241,14 +283,19 @@ def chat(request: ChatRequest):
         memory = get_memory(project_id)
 
     # -------- Planning (Tool / Skill / raw reasoning — see planning_service.py) --------
-    # An attached image skips planning entirely, added 2026-08-02: none
-    # of the current Tools/Skills know what to do with image bytes, so
-    # letting the LLM planner route an image-attached prompt into, say,
-    # calculate_and_explain would be nonsensical rather than just wrong.
-    # Same shape as plan()'s own rule-based short-circuits (e.g.
-    # is_simple_math) — Plan(capability_type="reasoning", ...) is exactly
-    # what a plain reasoning-path response already looks like.
-    if request.images:
+    # An attached image or file skips planning entirely, added
+    # 2026-08-02 (images) / 2026-08-06 (files): none of the current
+    # Tools/Skills know what to do with image bytes or inline file
+    # content, so letting the LLM planner route an attachment-bearing
+    # prompt into, say, calculate_and_explain would be nonsensical
+    # rather than just wrong. Same shape as plan()'s own rule-based
+    # short-circuits (e.g. is_simple_math) — Plan(capability_type=
+    # "reasoning", ...) is exactly what a plain reasoning-path response
+    # already looks like. Planning still runs on the original `prompt`,
+    # not augmented_prompt, in the one case it does run (neither
+    # attached) — moot otherwise since planning is skipped whenever
+    # augmented_prompt would differ from prompt.
+    if request.images or request.files:
         the_plan = Plan(capability_type="reasoning", capability_name=None, source="rule")
     else:
         the_plan = plan(prompt, project_id)
@@ -261,7 +308,7 @@ def chat(request: ChatRequest):
     # documented in validation_service.py's module docstring.
     def _attempt() -> str:
         if the_plan.capability_type == "reasoning":
-            return generate(prompt, model, history, memory, images=request.images)
+            return generate(augmented_prompt, model, history, memory, images=request.images)
         return execute_plan(the_plan, prompt, request_id=request_id)
 
     start = time.monotonic()

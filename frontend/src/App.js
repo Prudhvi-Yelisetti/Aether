@@ -36,6 +36,7 @@ function App() {
   const [settings, setSettings] = useState(loadSettings);
   const [llmValidate, setLlmValidate] = useState(() => loadSettings().defaultValidate);
   const [pendingImages, setPendingImages] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
 
   const refreshProjects = async () => {
     setProjects(await fetchProjects());
@@ -106,17 +107,29 @@ function App() {
   };
 
   const sendMessage = async () => {
-    if ((!input.trim() && pendingImages.length === 0) || loading || !currentProject) return;
+    if (
+      (!input.trim() && pendingImages.length === 0 && pendingFiles.length === 0) ||
+      loading ||
+      !currentProject
+    )
+      return;
 
     setLoading(true);
     const sentImages = pendingImages;
+    const sentFiles = pendingFiles;
     setMessages((prev) => [
       ...prev,
-      { role: "user", text: input, images: sentImages.map((img) => img.dataUrl) },
+      {
+        role: "user",
+        text: input,
+        images: sentImages.map((img) => img.dataUrl),
+        files: sentFiles.map((f) => ({ name: f.name })),
+      },
     ]);
     const sentInput = input;
     setInput("");
     setPendingImages([]);
+    setPendingFiles([]);
 
     try {
       const data = await sendChatMessage({
@@ -131,6 +144,7 @@ function App() {
         // data URL stays in the message above, since that's what the
         // <img> preview needs.
         images: sentImages.map((img) => img.dataUrl.split(",")[1]),
+        files: sentFiles.map((f) => ({ name: f.name, content: f.content })),
       });
 
       if (!currentChat && data.chat_id) {
@@ -189,6 +203,8 @@ function App() {
         setLlmValidate={setLlmValidate}
         pendingImages={pendingImages}
         setPendingImages={setPendingImages}
+        pendingFiles={pendingFiles}
+        setPendingFiles={setPendingFiles}
       />
 
       {showCapabilities && (

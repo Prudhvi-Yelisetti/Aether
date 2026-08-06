@@ -359,6 +359,79 @@
 }
 .pending-image-remove:hover { background: var(--danger); }
 
+/* Pending text-file chips, added 2026-08-06 alongside document upload
+   support (see ChatWindow.js's addFiles). Same pill language as
+   .trace-chip/.toggle-validate rather than a new visual pattern. */
+.pending-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pending-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 220px;
+}
+
+.pending-file-remove {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+.pending-file-remove:hover { color: var(--danger); }
+
+.unsupported-file-notice {
+  color: var(--warning);
+  font-size: 12px;
+  margin: 0;
+}
+
+.unsupported-file-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.unsupported-file-dismiss:hover { color: var(--text); }
+
+/* File chips inside a sent message bubble — same chip, no remove
+   button, sits above the message text like .message-images does. */
+.message-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.message-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* Attach-image button — same visual weight as the validate pill, sits
    to its left in composer-actions. */
 .composer-attach {
