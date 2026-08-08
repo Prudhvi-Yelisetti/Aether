@@ -1,3 +1,4 @@
+import base64
 import time
 import uuid
 
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
+from services.document_extraction import extract_document_text
 from services.logging_config import configure_logging, get_logger
 from services.reasoning_service import generate
 from services.routing import select_model, VISION_MODEL
@@ -80,6 +82,14 @@ app.add_middleware(
 class FileAttachment(BaseModel):
     name: str
     content: str
+    # Added 2026-08-06 for PDF/DOCX support (see
+    # services/document_extraction.py). "text" (default) means content
+    # is already plain text, extracted client-side (.txt/.md/.csv/etc,
+    # see ChatWindow.js) — unchanged from before this field existed.
+    # "base64" means content is the raw file bytes, base64-encoded, and
+    # needs server-side extraction (PDF/DOCX can't be parsed into text
+    # by just decoding UTF-8 the way a .txt file can).
+    encoding: str = "text"
 
 
 class ChatRequest(BaseModel):
@@ -259,14 +269,33 @@ def chat(request: ChatRequest):
     # across all files, a guess at "enough for a real document without
     # blowing up a small model's context window" — not measured against
     # an actual context-length failure yet.
+    #
+    # encoding="base64" (PDF/DOCX, added 2026-08-06) needs server-side
+    # extraction first — see services/document_extraction.py for why
+    # that's libraries-first with vision-model OCR only as a fallback
+    # for scanned PDFs, not a bundled OCR engine. Extraction failure
+    # (corrupt file, password-protected PDF, etc.) becomes an inline
+    # note in the prompt, not a 500 — the request should still get a
+    # response, just one that's honest about the one file it couldn't
+    # read.
     MAX_FILE_CONTEXT_CHARS = 50_000
     augmented_prompt = prompt
     if request.files:
         parts = []
         budget = MAX_FILE_CONTEXT_CHARS
         for f in request.files:
-            content = f.content[:budget]
-            if len(f.content) > budget:
+            if f.encoding == "base64":
+                try:
+                    raw_bytes = base64.b64decode(f.content)
+                    extracted = extract_document_text(f.name, raw_bytes)
+                except Exception as e:
+                    logger.warning("document_extraction_failed", filename=f.name, error=str(e))
+                    extracted = f"[Could not extract text from this file: {e}]"
+            else:
+                extracted = f.content
+
+            content = extracted[:budget]
+            if len(extracted) > budget:
                 content += "\n[...truncated, file continues...]"
             parts.append(f"--- Attached file: {f.name} ---\n{content}")
             budget -= len(content)

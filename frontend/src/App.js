@@ -144,7 +144,12 @@ function App() {
         // data URL stays in the message above, since that's what the
         // <img> preview needs.
         images: sentImages.map((img) => img.dataUrl.split(",")[1]),
-        files: sentFiles.map((f) => ({ name: f.name, content: f.content })),
+        // encoding: "base64" for PDF/DOCX (server-side extraction, see
+        // main.py/document_extraction.py), "text" (the default the
+        // backend assumes when omitted) for everything else — added
+        // 2026-08-07, must be passed through here or a PDF/DOCX's raw
+        // base64 bytes get treated as literal text server-side.
+        files: sentFiles.map((f) => ({ name: f.name, content: f.content, encoding: f.encoding || "text" })),
       });
 
       if (!currentChat && data.chat_id) {

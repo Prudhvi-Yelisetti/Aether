@@ -55,9 +55,10 @@ export async function sendChatMessage({ prompt, mode, projectId, chatId, llmVali
       // ChatRequest for why an attached image overrides model anyway.
       model: model || null,
       images: images && images.length ? images : null,
-      // files: [{name, content}], plain-text extracted client-side
-      // (see ChatWindow.js's readFileAsText) — main.py's ChatRequest
-      // for why PDF/DOCX aren't supported yet.
+      // files: [{name, content, encoding}] — encoding "text" for
+      // plain-text documents extracted client-side, "base64" for
+      // PDF/DOCX (server-side extraction, see main.py/
+      // document_extraction.py) — see ChatWindow.js's addFiles.
       files: files && files.length ? files : null,
     }),
   });

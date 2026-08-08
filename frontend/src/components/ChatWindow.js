@@ -66,18 +66,28 @@ export default function ChatWindow({
   // Added 2026-08-06 after Prudhvi found the composer only accepted
   // images. Plain-text documents (.txt/.md/.csv/.json/.log/.yaml/.xml)
   // are read as text and sent inline as context — see main.py's
-  // ChatRequest.files. PDF/DOCX aren't supported: extracting real text
-  // from those needs a parsing library on the backend, which is a
-  // bigger, riskier addition (new deps in the packaged AppImage's venv)
-  // deliberately left out of this pass rather than half-supported.
-  // MIME type detection is unreliable for text-ish files across
-  // OSes/browsers (many report an empty file.type for .md/.log/.yaml),
-  // so this checks the extension too, not just file.type.
+  // ChatRequest.files. MIME type detection is unreliable for text-ish
+  // files across OSes/browsers (many report an empty file.type for
+  // .md/.log/.yaml), so this checks the extension too, not just
+  // file.type.
   const TEXT_EXTENSIONS = [".txt", ".md", ".csv", ".json", ".log", ".yaml", ".yml", ".xml", ".tsv"];
   const isTextLikeFile = (file) => {
     if (file.type.startsWith("text/") || file.type === "application/json") return true;
     const lower = file.name.toLowerCase();
     return TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  };
+
+  // Added 2026-08-07: PDF/DOCX can't be parsed into text just by
+  // reading bytes as UTF-8 the way a .txt file can — extraction has to
+  // happen server-side (services/document_extraction.py: PyMuPDF/
+  // python-docx first, vision-model OCR as a fallback for scanned
+  // PDFs with no text layer). This just reads the raw bytes as a data
+  // URL and sends encoding="base64" — same mechanism as an image
+  // attachment, different destination field.
+  const DOCUMENT_EXTENSIONS = [".pdf", ".docx"];
+  const isDocumentFile = (file) => {
+    const lower = file.name.toLowerCase();
+    return DOCUMENT_EXTENSIONS.some((ext) => lower.endsWith(ext));
   };
 
   const readFileAsText = (file) =>
@@ -86,6 +96,14 @@ export default function ChatWindow({
       reader.onload = () => resolve(reader.result);
       reader.onerror = reject;
       reader.readAsText(file);
+    });
+
+  const readFileAsBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
     });
 
   // Added 2026-08-02 for multi-modal support (see main.py's
@@ -111,6 +129,18 @@ export default function ChatWindow({
             };
             reader.readAsDataURL(file);
           });
+        return;
+      }
+
+      if (isDocumentFile(file)) {
+        readFileAsBase64(file)
+          .then((base64Content) => {
+            setPendingFiles((prev) => [
+              ...prev,
+              { name: file.name, content: base64Content, encoding: "base64" },
+            ]);
+          })
+          .catch(() => setUnsupportedFile(file.name));
         return;
       }
 
@@ -192,7 +222,7 @@ export default function ChatWindow({
     >
       {isDraggingFile && (
         <div className="drop-overlay">
-          <p>Drop image or text file to attach</p>
+          <p>Drop image or document to attach</p>
         </div>
       )}
       {!currentProject && (
@@ -299,8 +329,8 @@ export default function ChatWindow({
               )}
               {unsupportedFile && (
                 <p className="unsupported-file-notice">
-                  "{unsupportedFile}" isn't supported yet — try .txt, .md, .csv, .json, .log, or an
-                  image.{" "}
+                  "{unsupportedFile}" isn't supported yet — try .txt, .md, .csv, .json, .log, .pdf,
+                  .docx, or an image.{" "}
                   <button className="unsupported-file-dismiss" onClick={() => setUnsupportedFile(null)}>
                     dismiss
                   </button>
@@ -319,7 +349,7 @@ export default function ChatWindow({
             <div className="composer-actions">
               <input
                 type="file"
-                accept="image/*,.txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.tsv,text/*"
+                accept="image/*,.txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.tsv,.pdf,.docx,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 multiple
                 ref={fileInputRef}
                 onChange={handleFilesSelected}
@@ -327,15 +357,15 @@ export default function ChatWindow({
               />
               {/* Images route to the vision-capable model server-side
                   (see main.py); text files (.txt/.md/.csv/.json/.log/
-                  etc.) get read and sent as inline context. PDF/DOCX
-                  aren't supported yet (see ChatWindow.js's addFiles) —
-                  this button doesn't need to know model routing either
-                  way. */}
+                  etc.) get read and sent as inline context; PDF/DOCX
+                  get read as base64 and extracted server-side (see
+                  services/document_extraction.py) — this button
+                  doesn't need to know any of that routing either way. */}
               <button
                 className="composer-attach"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={loading}
-                title="Attach an image or text file (.txt, .md, .csv, .json, .log)"
+                title="Attach an image, PDF, DOCX, or text file (.txt, .md, .csv, .json, .log)"
                 aria-label="Attach a file"
               >
                 📎
