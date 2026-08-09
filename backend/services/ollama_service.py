@@ -30,6 +30,37 @@ REQUEST_TIMEOUT_SECONDS = 60
 # downscaling fix.
 IMAGE_REQUEST_TIMEOUT_SECONDS = 180
 
+# Real bug found live 2026-08-09, then corrected mid-investigation --
+# see STATUS.md for the full trail. Original claim ("any moderately
+# long prompt can silently return empty") was overstated: it came from
+# a diagnostic probe that omitted `think: false`, reintroducing the
+# exact unbounded-thinking bug the 2026-07-22 fix above already
+# resolved -- a test artifact, not a real production bug, since
+# generate_response() below always sets think=False.
+#
+# Redone correctly (think=False, matching production): the real,
+# narrower bug is that Ollama's 4096-token default runtime context
+# window (model's actual capacity is 262144, confirmed via /api/show)
+# is already too tight for realistic near-budget file attachments.
+# A 49,731-char prompt (just under main.py's 50k-char attachment
+# budget) consumed prompt_eval_count=4095 of the 4096 default almost
+# entirely on its own, leaving room for exactly 1 output token --
+# response came back as the single truncated word "Based",
+# done_reason="length". At num_ctx=16384 the same prompt completes
+# normally with a full, coherent answer.
+#
+# 16384 chosen over the model's full 262144 capacity because this
+# machine has a 4GB-VRAM GPU (RTX 3050 laptop, confirmed via
+# nvidia-smi) with only ~985MB of a 6.7GB model actually resident on
+# it -- most inference is CPU-offloaded at ~6.9 tokens/sec (confirmed
+# via ollama's slot print_timing logs), so KV-cache memory is not
+# free here. 16384 covers the realistic near-50k-char-budget case with
+# room to spare, without the 16x memory jump straight to 262144 would
+# cost. Not independently load-tested against this machine's ceiling
+# under concurrent/heavier use -- if it proves insufficient, that's
+# the next thing to measure.
+NUM_CTX = 16384
+
 
 def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory=None, think: bool = False, images=None):
     full_prompt = ""
@@ -99,6 +130,7 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory
             "prompt": full_prompt,
             "stream": False,
             "think": think,
+            "options": {"num_ctx": NUM_CTX},
         }
         # Added 2026-08-02 for multi-modal support (see routing.py's
         # VISION_MODEL, main.py's ChatRequest.images) — Ollama's
@@ -123,6 +155,25 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory
         if "response" not in data:
             logger.warning("ollama_response_missing_field", model=model, data=data)
             return f"Error from {model}: {data}"
+
+        # Defense-in-depth for the bug NUM_CTX above fixes: if a
+        # request still exhausts the context window despite the larger
+        # ceiling (e.g. a file near/at the 50k-char attachment budget
+        # plus a long conversation history), don't let it silently
+        # degrade to a truncated/empty response the way it did at the
+        # 4096 default -- surface it as an explicit, visible error.
+        if not data["response"].strip() and data.get("done_reason") == "length":
+            logger.warning(
+                "ollama_empty_response_context_exhausted",
+                model=model,
+                prompt_eval_count=data.get("prompt_eval_count"),
+                eval_count=data.get("eval_count"),
+                num_ctx=NUM_CTX,
+            )
+            return (
+                f"{model} ran out of context window (limit: {NUM_CTX} tokens) before "
+                "producing a response -- try a shorter message or fewer/smaller attachments."
+            )
 
         return data["response"]
 
