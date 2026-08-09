@@ -269,6 +269,15 @@ export default function ChatWindow({
                   )}
                   {msg.text}
                 </div>
+                {msg.role === "ai" && msg.attachmentNotices && msg.attachmentNotices.length > 0 && (
+                  <div className="attachment-notices">
+                    {msg.attachmentNotices.map((n, i) => (
+                      <div className="attachment-notice" key={i}>
+                        ⚠️ {n}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {msg.role === "ai" && msg.capabilityType && (
                   <CapabilityTrace
                     capabilityType={msg.capabilityType}

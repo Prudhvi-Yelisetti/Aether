@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
-from services.document_extraction import extract_document_text
+from services.document_extraction import extract_document_text, MAX_OCR_PAGES
 from services.logging_config import configure_logging, get_logger
 from services.reasoning_service import generate
 from services.routing import select_model, VISION_MODEL
@@ -280,10 +280,25 @@ def chat(request: ChatRequest):
     # read.
     MAX_FILE_CONTEXT_CHARS = 50_000
     augmented_prompt = prompt
+    # Surfaced 2026-08-09: both truncation paths below (context budget,
+    # OCR page cap) already leave an inline note in the text sent to the
+    # model, but that's invisible to the person attaching the file —
+    # they'd only see it if the model happened to mention it back. This
+    # collects the same events as short, human-readable strings and
+    # returns them separately (see `attachment_notices` in the response
+    # dict below) so the frontend can show a real UI indicator instead.
+    attachment_notices: List[str] = []
     if request.files:
         parts = []
         budget = MAX_FILE_CONTEXT_CHARS
         for f in request.files:
+            if budget <= 0:
+                attachment_notices.append(
+                    f"{f.name}: not included — the {MAX_FILE_CONTEXT_CHARS:,}-char attachment budget "
+                    f"was already used up by earlier files"
+                )
+                continue
+
             if f.encoding == "base64":
                 try:
                     raw_bytes = base64.b64decode(f.content)
@@ -294,13 +309,24 @@ def chat(request: ChatRequest):
             else:
                 extracted = f.content
 
+            # This substring is exactly what document_extraction.py's
+            # OCR fallback inserts when a scanned PDF exceeds
+            # MAX_OCR_PAGES — checked here rather than changing that
+            # function's return type, since main.py is the one place
+            # that needs to turn it into a UI-facing signal.
+            if "more page(s) not transcribed" in extracted:
+                attachment_notices.append(
+                    f"{f.name}: scanned-PDF OCR is capped at {MAX_OCR_PAGES} pages — later pages weren't transcribed"
+                )
+
             content = extracted[:budget]
             if len(extracted) > budget:
                 content += "\n[...truncated, file continues...]"
+                attachment_notices.append(
+                    f"{f.name}: truncated to fit the {MAX_FILE_CONTEXT_CHARS:,}-char attachment budget"
+                )
             parts.append(f"--- Attached file: {f.name} ---\n{content}")
             budget -= len(content)
-            if budget <= 0:
-                break
         augmented_prompt = "\n\n".join(parts) + f"\n\n---\n\n{prompt}"
 
     # -------- Fetch Context --------
@@ -423,4 +449,10 @@ def chat(request: ChatRequest):
         "escalated": decision.escalated,
         # Exposed 2026-07-31 alongside llm_validation_verdict above.
         "llm_validation": llm_validation_verdict,
+        # Exposed 2026-08-09: see attachment_notices' comment above —
+        # not persisted to chat_data/add_chat (history rows predating
+        # this change have no equivalent), so only live in the response
+        # of the request that triggered them, same as llm_validation
+        # was before 44f9e98b07f2 added storage for it.
+        "attachment_notices": attachment_notices,
     }

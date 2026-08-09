@@ -169,6 +169,7 @@ function App() {
           attempts: data.attempts || 1,
           escalated: !!data.escalated,
           llmValidation: data.llm_validation || null,
+          attachmentNotices: data.attachment_notices || [],
         },
       ]);
     } catch (err) {

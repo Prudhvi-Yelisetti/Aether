@@ -432,6 +432,26 @@
   color: var(--text-muted);
 }
 
+/* Attachment truncation/OCR-cap notices (added 2026-08-09) — reuses
+   --warning, the same token trace-outcome-retried/escalated already use,
+   so a truncated attachment reads with the same visual weight as a
+   retried or escalated response rather than inventing a new color. */
+.attachment-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-2);
+}
+
+.attachment-notice {
+  font-size: 12px;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--space-2);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
 /* Attach-image button — same visual weight as the validate pill, sits
    to its left in composer-actions. */
 .composer-attach {
