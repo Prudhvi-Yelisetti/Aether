@@ -8,7 +8,7 @@ Prudhvi is building Aether: a chatbot MVP evolving toward an AI Operating System
 
 **Phases A through E3 are implemented and fully complete.** 5 Tools, 5 Skills. The frontend shows a live capability/decision trace, historical traces, `llm_validate` verdicts, project memory, a New Project modal, and — new this session — a Settings panel (model override, default-validate). **Full multi-modal support**: images (auto-downscaled client-side), plain-text documents, and PDF/DOCX (native text extraction, vision-model OCR as a fallback for scanned PDFs) can all be attached to a chat message. **Packaged as a self-contained AppImage** (`packaging/appimage/`, `~/Aether-x86_64.AppImage`) — every feature above has been live-verified against the actual packaged build, not just the dev environment.
 
-**Push status, precisely**: `origin/main` confirmed current through `566ee8f` (Prudhvi ran `ssh-add` + `git push` locally this session; verified via `git status --short --branch` showing no `[ahead N]`). Working tree clean, nothing uncommitted.
+**Push status, precisely**: `origin/main` confirmed current through `8111072` (verified via `git status --short --branch` showing no `[ahead N]`). Working tree clean, nothing uncommitted.
 
 Completed phases (see `ROADMAP.md` for full checklists, `STATUS.md` for verification details on each item):
 - **Phase A** — security: pooled SQLAlchemy DB, removed `eval()`, `bwrap`-sandboxed code execution, allowlisted file reads, Alembic migrations, structured logging + request IDs
@@ -42,12 +42,13 @@ Completed phases (see `ROADMAP.md` for full checklists, `STATUS.md` for verifica
 16. **UI polish round 2**: fixed the validate toggle (root-caused via DOM measurement — it was a disconnected, unstyled native checkbox, not just "looks off"); added a Settings panel (model override live from a new `GET /models`, default-validate, both backend-wired not filler); added full multi-modal image support (checked `GET /api/tags` for vision capability before building anything, forces the vision model and skips planning for image-attached requests); added drag-and-drop. **Found and fixed a real bug from Prudhvi's own independent use** (not a synthetic test): large real photos consistently timed out during vision inference — fixed with a longer image-specific timeout as a safety net, and client-side downscaling as the actual fix (2MB → ~215KB). Also surfaced two real lessons about testing methodology itself — see `STATUS.md` item 16 and the Environment notes below.
 17. **Document attachments.** Prudhvi: "I can't upload anything except image files" — real gap, the composer only accepted `image/*`. Added plain-text file support first (zero new dependencies), then PDF/DOCX after Prudhvi asked directly which approach was best ("unlimited OCR vs libraries, do whatever is best") — went with **libraries first (PyMuPDF, python-docx), vision-model OCR only as a fallback for genuinely scanned PDFs**, not a bundled OCR engine, reasoned out in `STATUS.md` item 17. Verified live through the actual UI with three real files (native PDF, DOCX with a table, and a genuinely scanned PDF confirmed to have zero extractable text before testing) — all three correct. Rebuilt the AppImage with the new dependencies and re-verified against the packaged build.
 18. **UI truncation indicator + a real Ollama context-window bug, with a wrong first diagnosis corrected in the same session.** Pushed the prior session's 15 outstanding commits first. Added `attachment_notices` to the `/chat` response (context-budget truncation, OCR page-cap hit, file skipped for budget exhaustion) rendered as a UI warning badge — live-verified via API and through the real browser with Playwright. Tuned the image-downscale guess against a real fine-print test image: current default (1280px/0.85) already reads every field correctly, faster than two larger candidates — left as-is. Investigating the file-context budget surfaced a bigger issue: Ollama defaults every request to a 4096-token runtime window regardless of the model's real 262144-token capacity, and `ollama_service.py` never overrode it. **First diagnostic probe overstated the bug** — it omitted `think: false`, reintroducing the exact unbounded-thinking bug item 2 already fixed, producing an alarming but wrong "any moderately long prompt returns empty" result. Redone correctly (`think=False`, matching production): the real bug only appears with a realistic near-budget prompt (49,731 chars, just under the 50k-char attachment limit), which ate `prompt_eval_count: 4095` of the 4096 default and returned the single truncated word `"Based"`. Fixed by raising `num_ctx` to 16384 (verified both against raw Ollama and end-to-end through `/chat`), sized to this machine's tight 4GB-VRAM GPU rather than the model's full capacity, plus a defense-in-depth safety net that returns an explicit error instead of ever silently going blank again.
+19. **Load-tested `NUM_CTX=16384` against the realistic worst case.** Built 10 real prior exchanges in one chat (filling `get_chat_history`'s `limit=10` window) then sent the full 50,000-char file on top — completed cleanly in 31.4s, and Ollama's own log confirmed only 7,845 of 16,384 tokens used (48%) — comfortable headroom, not marginal. Also fired 3 concurrent requests: all succeeded correctly, but Ollama's single GPU slot serializes them (staggered 8.1s/9.1s/10.0s completions, confirmed via `launch_slot_`/`release` log entries) rather than running in parallel — a real capacity constraint on this hardware worth knowing, not a bug.
 
 Full detail, including every verification step and exact commands, is in `STATUS.md` — read that, not just this summary, before treating any of this as settled.
 
 ## Uncommitted changes (as of this handoff)
 
-None — working tree is clean. Everything through `566ee8f` (item 18) is committed and pushed to `origin/main`.
+None — working tree is clean. Everything through `8111072` (item 18's docs) is committed and pushed to `origin/main`. Item 19 (load-testing) produced no code changes, only findings — documented in `STATUS.md`, no new commit needed beyond this handoff update.
 
 ## Key decisions
 
@@ -86,7 +87,7 @@ None — working tree is clean. Everything through `566ee8f` (item 18) is commit
 1. Decide direction for what's next (Prudhvi's call):
    - Run a **larger, more adversarial `llm_validate` batch** before considering enforcement — 18/18 agreement so far is promising but small-sample
    - Keep expanding the Tool/Skill set
-   - **Load-test the new `NUM_CTX=16384` ceiling** — chosen for this machine's 4GB VRAM, not derived from a load test; also worth re-checking whether the 5-page OCR cap and 50k-char file budget are still the right numbers now that the context-window bug underneath them is fixed
+   - **Higher-concurrency load testing** — item 19 confirmed 3 concurrent requests queue safely through Ollama's single slot rather than failing, but didn't measure how bad the queue gets at higher concurrency, or whether that's an acceptable real-world experience
    - Persist `attachment_notices` to chat history (currently only live in the triggering request's response)
 2. Known gap, not urgent: `Tool` and `Skill` objects still lack the AI Object Model's full metadata that `Step` has via `ScriptMeta`.
 3. Real design gap, not urgent: the memory bleed-through fix (item 14) is prompt-level, not structural.
@@ -100,7 +101,8 @@ None — working tree is clean. Everything through `566ee8f` (item 18) is commit
 - `RETRY_DELAY_SECONDS = 2.0` is a guess, not measured against a real outage.
 - Web search still isn't 100% reliable on very messy phrasing — real, honest residual limit.
 - Whether the memory bleed-through fix needs to go further than prompt framing.
-- Whether `NUM_CTX=16384` (item 18) holds up under real/concurrent load, or whether the 5-page OCR cap and 50k-char file budget need their own tuning now that the bigger context-window constraint is fixed.
+- Whether the 5-page OCR cap or 50k-char file budget need their own tuning — no longer the binding constraint (item 19 confirmed `NUM_CTX=16384` has real headroom), but neither was independently re-measured this session.
+- Whether Ollama's single-slot serialization (item 19) is an acceptable experience under real multi-user load, or worth addressing (e.g. a request queue with visible position/wait time in the UI).
 
 ## Suggested skills
 
