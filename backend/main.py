@@ -23,6 +23,7 @@ from storage.project_store import (
     add_chat,
     get_chat_history,
     get_memory,
+    get_relevant_episodic_memory,
     save_memory,
     project_exists,
     create_chat,
@@ -212,16 +213,20 @@ def get_project_chats_api(project_id: str):
 
 @app.get("/project/{project_id}/memory")
 def get_project_memory_api(project_id: str):
-    """What's actually stored for this project and injected into every
-    reasoning-path prompt (see ollama_service.py's "Stored context"
-    section) — added 2026-07-31 alongside the fix for memory bleeding
-    into unrelated answers (STATUS.md item 13), so the person using the
-    UI can see the same thing the model sees instead of it being an
-    invisible backend detail."""
+    """Everything stored for this project, both types. Semantic rows are
+    injected into every reasoning-path prompt; episodic rows only when
+    they match the current prompt by keyword overlap (see
+    get_relevant_episodic_memory() in storage/project_store.py and
+    ollama_service.py's "Stored context" section) — added 2026-07-31
+    alongside the fix for memory bleeding into unrelated answers
+    (STATUS.md item 13), extended in a91c3d5e7f02 to actually separate
+    the two kinds of memory instead of just relabeling them, so the
+    person using the UI can see the real distinction, not an invisible
+    backend detail."""
     if not project_exists(project_id):
         return {"error": "Project not found"}
 
-    return {"memory": [{"key": k, "value": v} for k, v in get_memory(project_id)]}
+    return {"memory": [{"key": k, "value": v, "memory_type": t} for k, v, t in get_memory(project_id)]}
 
 
 # -------- Chat Route --------
@@ -331,11 +336,19 @@ def chat(request: ChatRequest):
 
     # -------- Fetch Context --------
     history = None
-    memory = None
+    semantic_memory = None
+    episodic_memory = None
 
     if project_id:
         history = get_chat_history(project_id, chat_id)
-        memory = get_memory(project_id)
+        # Semantic: always fetched in full (small, durable, always
+        # relevant — the way you don't need a specific cue to recall
+        # your own name). Episodic: cue-filtered by keyword overlap
+        # with the actual prompt, not the augmented one (still just the
+        # user's words, not file-attachment text/system framing) — see
+        # get_relevant_episodic_memory()'s docstring and a91c3d5e7f02.
+        semantic_memory = get_memory(project_id, memory_type="semantic")
+        episodic_memory = get_relevant_episodic_memory(project_id, prompt)
 
     # -------- Planning (Tool / Skill / raw reasoning — see planning_service.py) --------
     # An attached image or file skips planning entirely, added
@@ -363,7 +376,7 @@ def chat(request: ChatRequest):
     # documented in validation_service.py's module docstring.
     def _attempt() -> str:
         if the_plan.capability_type == "reasoning":
-            return generate(augmented_prompt, model, history, memory, images=request.images)
+            return generate(augmented_prompt, model, history, semantic_memory, episodic_memory, images=request.images)
         return execute_plan(the_plan, prompt, request_id=request_id)
 
     start = time.monotonic()
@@ -415,7 +428,7 @@ def chat(request: ChatRequest):
         facts = extract_memory_facts(prompt)
 
         for key, value in facts.items():
-            save_memory(project_id, key, value)
+            save_memory(project_id, key, value, memory_type="semantic")
 
     # -------- Store Chat --------
     if project_id:

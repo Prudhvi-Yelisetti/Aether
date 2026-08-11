@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, Boolean, UniqueConstraint, func
+from sqlalchemy import Column, Integer, String, DateTime, Float, Boolean, func
 from db.database import Base
 
 
@@ -32,16 +32,27 @@ class Chat(Base):
 
 
 class Memory(Base):
+    """Two cognitively distinct kinds of stored information share this
+    table, distinguished by memory_type (added in a91c3d5e7f02 — see
+    that migration's docstring for the full brain-memory-systems
+    rationale): 'semantic' (durable, always-relevant user facts, from
+    services/memory_extraction.py) and 'episodic' (specific past
+    skill-run results, from services/steps/save_memory_step.py).
+
+    No longer a table-wide UniqueConstraint on (project_id, key) — that
+    assumed one row per key, which is right for semantic facts (a name
+    has one current value) but wrong for episodic memory, which keeps a
+    short bounded history of recent episodes per key. "One semantic row
+    per key" is enforced at the application level instead — see
+    save_memory() in storage/project_store.py."""
     __tablename__ = "memory"
-    __table_args__ = (
-        UniqueConstraint("project_id", "key", name="uq_memory_project_key"),
-    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, nullable=False)
     key = Column(String, nullable=False)
     value = Column(String)
     timestamp = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    memory_type = Column(String, nullable=False, default="semantic")
 
 
 class Experience(Base):

@@ -648,6 +648,16 @@
   margin: 0 0 var(--space-3);
 }
 
+/* Semantic/episodic memory section headings, added 2026-08-10 alongside
+   the memory-architecture restructure — same weight as capability-item
+   names, sits above capability-section-note the way a subheading would. */
+.memory-section-heading {
+  font-size: 13px;
+  font-weight: 600;
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--text);
+}
+
 .capability-item {
   display: flex;
   flex-direction: column;

@@ -36,9 +36,15 @@ def _is_failure_message(text: str) -> bool:
     return isinstance(text, str) and text.startswith(FAILURE_PREFIXES)
 
 
-def generate(prompt: str, model: str = FAST_MODEL, history=None, memory=None, images=None) -> str:
+def generate(prompt: str, model: str = FAST_MODEL, history=None, semantic_memory=None, episodic_memory=None, images=None) -> str:
     """Graceful variant — returns a human-readable string even on failure.
     Use this for anything a user will read directly (chat responses).
+
+    semantic_memory / episodic_memory (split in a91c3d5e7f02, previously
+    one `memory` param): durable user facts vs. specific past skill-run
+    results — see storage/project_store.py's module comment and
+    ollama_service.py's prompt-construction code for why they're framed
+    differently instead of one undifferentiated "memory" blob.
 
     images (added 2026-08-02): list of base64-encoded strings, no
     data:image/... prefix — see main.py's ChatRequest.images and
@@ -48,15 +54,22 @@ def generate(prompt: str, model: str = FAST_MODEL, history=None, memory=None, im
     an attached image to begin with."""
     # Provider selection would branch here once a second provider exists —
     # e.g. by model name prefix, or a config flag. Only one provider today.
-    return _ollama_generate(prompt, model=model, history=history, memory=memory, images=images)
+    return _ollama_generate(
+        prompt, model=model, history=history,
+        semantic_memory=semantic_memory, episodic_memory=episodic_memory,
+        images=images,
+    )
 
 
-def generate_strict(prompt: str, model: str = FAST_MODEL, history=None, memory=None) -> str:
+def generate_strict(prompt: str, model: str = FAST_MODEL, history=None, semantic_memory=None, episodic_memory=None) -> str:
     """Strict variant — raises ReasoningError on failure instead of
     returning a friendly string. Use this for automated callers (Steps,
     pipelines) that check success programmatically rather than displaying
     the result to a human."""
-    result = _ollama_generate(prompt, model=model, history=history, memory=memory)
+    result = _ollama_generate(
+        prompt, model=model, history=history,
+        semantic_memory=semantic_memory, episodic_memory=episodic_memory,
+    )
     if _is_failure_message(result):
         raise ReasoningError(result)
     return result

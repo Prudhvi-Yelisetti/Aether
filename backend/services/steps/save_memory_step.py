@@ -11,16 +11,22 @@ class SaveMemoryStep(Step):
     only serves one Skill, which isn't real reuse. Reads context[source_key]
     and context['project_id']."""
     name = "save_memory"
-    description = "Upserts context[source_key] into memory under memory_key, scoped to context['project_id']."
+    description = "Inserts context[source_key] as a new episodic memory row under memory_key, scoped to context['project_id']."
     script = ScriptMeta(
         step_id="step.save_memory",
-        version="1.1.0",
+        version="1.2.0",
         owner="prudhvi",
         history=(
             "1.0.0: initial implementation, hardcoded source_key='summarize', "
             "memory_key='last_research', Phase D",
             "1.1.0: both made configurable so FileDigestSkill could reuse this "
             "Step with a different memory_key instead of duplicating it",
+            "1.2.0: every SaveMemoryStep result is a specific past skill-run "
+            "artifact, never a durable user fact -- always writes "
+            "memory_type='episodic' now (a91c3d5e7f02's structural memory "
+            "fix). Behavior change: save_memory() no longer overwrites the "
+            "prior value for this key, it keeps a short bounded history "
+            "(EPISODIC_KEEP most recent) instead.",
         ),
     )
 
@@ -38,7 +44,7 @@ class SaveMemoryStep(Step):
             return StepResult(success=False, error=f"context['{self.source_key}'] is required")
 
         try:
-            save_memory(project_id, self.memory_key, value)
+            save_memory(project_id, self.memory_key, value, memory_type="episodic")
             return StepResult(success=True, output={"key": self.memory_key, "value": value})
         except Exception as e:
             return StepResult(success=False, error=str(e))

@@ -62,7 +62,7 @@ IMAGE_REQUEST_TIMEOUT_SECONDS = 180
 NUM_CTX = 16384
 
 
-def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory=None, think: bool = False, images=None):
+def generate_response(prompt: str, model: str = FAST_MODEL, history=None, semantic_memory=None, episodic_memory=None, think: bool = False, images=None):
     full_prompt = ""
 
     # -------- SYSTEM INSTRUCTIONS --------
@@ -71,46 +71,62 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, memory
         "Follow these rules strictly:\n"
         "1. Remember important user information.\n"
         "2. Be consistent with previous conversations.\n"
-        "3. Only use the stored context below if it is directly relevant "
-        "to the question you are answering right now -- otherwise ignore "
-        "it completely and just answer what was asked.\n\n"
+        "3. The \"What you know about the user\" section below is durable "
+        "background — use it when relevant, the way you'd naturally draw "
+        "on things you already know about someone.\n"
+        "4. The \"Relevant past results\" section (if present) was pulled "
+        "in because it matched a word in this message — it might still "
+        "not be what's actually being asked, so use it only if it "
+        "genuinely helps and ignore it otherwise.\n\n"
     )
 
     # -------- MEMORY (Structured) --------
-    # Real bug found live 2026-07-31 via llm_validate eval traffic (see
-    # STATUS.md item 13): this used to be labeled "User profile:" with
-    # the system instructions saying to "use stored user data when
-    # relevant" -- accurate for rows from extract_memory_facts() (name,
-    # stated preferences), but the *same* Memory table also holds
-    # SaveMemoryStep's fixed-key skill artifacts (last_file_digest,
-    # last_research -- see save_memory_step.py), which are not user
-    # facts at all, just "whatever that skill last produced in this
-    # project." Labeling everything "User profile" plus "use it when
-    # relevant" told the model to actively work irrelevant prior skill
-    # output into unrelated answers (asked about the boiling point of
-    # water, got an unprompted tangent about an earlier file digest).
-    # Relabeled + instructed above to ignore anything not relevant,
-    # rather than treating every stored row as a fact to surface.
+    # Structural fix in a91c3d5e7f02 (see storage/project_store.py's
+    # module comment for the full rationale) for the gap flagged as far
+    # back as STATUS.md item 13: that fix only relabeled one shared,
+    # undifferentiated list to say "may not be relevant, ignore if not"
+    # -- a real mitigation (the model stopped weaving in unprompted
+    # tangents), but not a fix, since the model still received and had
+    # to filter every stored row itself, on every request, regardless
+    # of the actual topic.
     #
-    # This is a prompt-level mitigation, not a structural fix -- the
-    # underlying mixing of "durable user facts" and "skill run
-    # artifacts" in one table with no relevance filtering is a real
-    # design gap, flagged in STATUS.md for whoever builds out a proper
-    # Memory Service later, not resolved here.
-    if memory:
-        full_prompt += (
-            "Stored context (facts and prior results from this project -- "
-            "may or may not be about the user, and may not be relevant to "
-            "the current question):\n"
-        )
-
+    # Two real inputs now, one per Tulving's semantic/episodic memory
+    # distinction (see the migration docstring for the full mapping):
+    #
+    # semantic_memory — durable, context-independent facts about the
+    # user (extract_memory_facts() output: name, stated preferences).
+    # Always included in full here — no relevance gate, because these
+    # are relevant by construction the same way you don't need a
+    # specific cue to recall your own name; it's just active background
+    # knowledge, not something retrieved on demand.
+    #
+    # episodic_memory — specific past skill-run results
+    # (SaveMemoryStep's last_research/last_file_digest). Arrives here
+    # ALREADY relevance-filtered by storage/project_store.py's
+    # get_relevant_episodic_memory() (keyword overlap with the current
+    # prompt) — this function doesn't do any filtering of its own, it
+    # just renders whatever the caller decided was actually relevant
+    # enough to retrieve, the way a cue either brings a specific memory
+    # to mind or it doesn't.
+    if semantic_memory:
+        full_prompt += "What you know about the user (durable, always relevant):\n"
         grouped = {}
-        for key, value in memory:
+        for key, value, _ in semantic_memory:
             grouped.setdefault(key, []).append(value)
-
         for key, values in grouped.items():
             full_prompt += f"{key}: {', '.join(values)}\n"
+        full_prompt += "\n"
 
+    if episodic_memory:
+        full_prompt += (
+            "Relevant past results (retrieved because they matched a "
+            "word in this message):\n"
+        )
+        grouped = {}
+        for key, value in episodic_memory:
+            grouped.setdefault(key, []).append(value)
+        for key, values in grouped.items():
+            full_prompt += f"{key}: {', '.join(values)}\n"
         full_prompt += "\n"
 
     # -------- CHAT HISTORY --------
