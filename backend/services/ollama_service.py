@@ -103,15 +103,16 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, semant
     # episodic_memory — specific past skill-run results
     # (SaveMemoryStep's last_research/last_file_digest). Arrives here
     # ALREADY relevance-filtered by storage/project_store.py's
-    # get_relevant_episodic_memory() (keyword overlap with the current
-    # prompt) — this function doesn't do any filtering of its own, it
-    # just renders whatever the caller decided was actually relevant
-    # enough to retrieve, the way a cue either brings a specific memory
-    # to mind or it doesn't.
+    # get_relevant_episodic_memory() (embedding-based cosine similarity
+    # as of STATUS.md item 21, keyword-overlap as a graceful fallback
+    # when embeddings are unavailable) — this function doesn't do any
+    # filtering of its own, it just renders whatever the caller decided
+    # was actually relevant enough to retrieve, the way a cue either
+    # brings a specific memory to mind or it doesn't.
     if semantic_memory:
         full_prompt += "What you know about the user (durable, always relevant):\n"
         grouped = {}
-        for key, value, _ in semantic_memory:
+        for key, value, _memory_type, _provenance in semantic_memory:
             grouped.setdefault(key, []).append(value)
         for key, values in grouped.items():
             full_prompt += f"{key}: {', '.join(values)}\n"
@@ -119,8 +120,8 @@ def generate_response(prompt: str, model: str = FAST_MODEL, history=None, semant
 
     if episodic_memory:
         full_prompt += (
-            "Relevant past results (retrieved because they matched a "
-            "word in this message):\n"
+            "Relevant past results (retrieved because they're similar "
+            "to this message):\n"
         )
         grouped = {}
         for key, value in episodic_memory:

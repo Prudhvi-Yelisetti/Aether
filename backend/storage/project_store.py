@@ -11,9 +11,11 @@ so main.py does not need to change.
 """
 
 import logging
+import json
 import re
 from db.database import SessionLocal
 from db.orm_models import Project, Chat, Memory
+from services.embedding_service import get_embedding, cosine_similarity
 
 logger = logging.getLogger("aether.storage")
 
@@ -45,15 +47,34 @@ logger = logging.getLogger("aether.storage")
 # every new one — the wrong kind of forgetting.
 EPISODIC_KEEP = 3
 
-# Cheap English stopword list for the keyword-overlap relevance filter
-# in get_relevant_episodic_memory() below — without this, "the" or "is"
-# appearing in both the prompt and a stored episode would count as a
-# real match and defeat the point of filtering. Deliberately small and
-# hand-picked, not a real NLP stopword library — this whole retrieval
-# mechanism is an honestly-scoped keyword-overlap heuristic (see that
-# function's docstring), not semantic search, and doesn't pretend
-# otherwise by reaching for a heavier dependency than the approach
-# actually warrants.
+# Cosine-similarity cutoff for get_relevant_episodic_memory() below.
+# Measured live against this project's own real test data (a stored
+# episode about Q3 revenue/pricing-tier growth), using nomic-embed-text
+# v1 with its required search_query/search_document task prefixes (see
+# embedding_service.py's docstring — an initial run without those
+# prefixes gave meaningfully worse separation and was discarded, not
+# used to set this number):
+#   direct reuse of a word from the episode ......... 0.719
+#   genuine paraphrase, no shared words .............. 0.697
+#   loosely related business topic .................... 0.613
+#   -------------------------------------------------- (real cases end here)
+#   clearly unrelated ("boiling point of water") ...... 0.516
+#   clearly unrelated ("birthday poem") ................ 0.416
+#   clearly unrelated ("pasta recipe") .................. 0.390
+# 0.55 sits in the ~0.10 gap between the lowest related score (0.613)
+# and the highest unrelated one (0.516). That gap is real but not huge
+# — this model doesn't push unrelated-sentence similarity anywhere near
+# zero the way some embedding models do, so there's real proximity to a
+# false positive/negative right around this line. Calibrated on one
+# stored document and six test prompts, not a rigorous study — revisit
+# with more real usage data if either direction turns out wrong.
+EPISODIC_SIMILARITY_THRESHOLD = 0.55
+
+# Cheap English stopword list — kept as a fallback for _tokenize(),
+# used only when embeddings are unavailable (Ollama down, embedding
+# model not pulled) so retrieval degrades to the old keyword-overlap
+# heuristic instead of returning nothing. See
+# get_relevant_episodic_memory()'s docstring for when this path fires.
 _STOPWORDS = {
     "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
     "and", "or", "but", "if", "of", "to", "in", "on", "for", "with",
@@ -175,17 +196,24 @@ def project_exists(project_id: str) -> bool:
         db.close()
 
 
-def save_memory(project_id: str, key: str, value: str, memory_type: str = "semantic"):
+def save_memory(project_id: str, key: str, value: str, memory_type: str = "semantic", provenance: str = None):
     """memory_type='semantic' (default): upserts on (project_id, key) —
     one current value per fact, same external behavior as before.
+    provenance (semantic only): set when this write came from
+    consolidation (services/consolidation_service.py) rather than
+    direct extraction/a user statement — see b47e91a3c6d4's docstring.
     memory_type='episodic': always inserts a new row (keeps history
-    instead of overwriting it), then prunes back to EPISODIC_KEEP most
-    recent rows for that (project_id, key). See the module-level
-    comment above for the full rationale."""
+    instead of overwriting it), computes and stores an embedding for
+    it (services/embedding_service.py — used by
+    get_relevant_episodic_memory() below), then prunes back to
+    EPISODIC_KEEP most recent rows for that (project_id, key). See the
+    module-level comment above for the full rationale."""
     db = SessionLocal()
     try:
         if memory_type == "episodic":
-            db.add(Memory(project_id=project_id, key=key, value=value, memory_type="episodic"))
+            vec = get_embedding(f"{key} {value}", task="search_document")
+            embedding_json = json.dumps(vec) if vec is not None else None
+            db.add(Memory(project_id=project_id, key=key, value=value, memory_type="episodic", embedding=embedding_json))
             db.commit()
 
             keep_ids = [
@@ -217,8 +245,9 @@ def save_memory(project_id: str, key: str, value: str, memory_type: str = "seman
             )
             if existing:
                 existing.value = value
+                existing.provenance = provenance
             else:
-                db.add(Memory(project_id=project_id, key=key, value=value, memory_type="semantic"))
+                db.add(Memory(project_id=project_id, key=key, value=value, memory_type="semantic", provenance=provenance))
             db.commit()
     except Exception:
         db.rollback()
@@ -238,14 +267,16 @@ def get_memory(project_id: str, memory_type: str = None):
     building a prompt (see get_relevant_episodic_memory() below for the
     episodic side of that — this plain filter is also used directly by
     callers, like the /memory endpoint, that want the full episodic
-    history rather than a relevance-gated subset)."""
+    history rather than a relevance-gated subset). Returns
+    (key, value, memory_type, provenance) — provenance is None except
+    for consolidated semantic rows (b47e91a3c6d4)."""
     db = SessionLocal()
     try:
-        q = db.query(Memory.key, Memory.value, Memory.memory_type).filter(Memory.project_id == project_id)
+        q = db.query(Memory.key, Memory.value, Memory.memory_type, Memory.provenance).filter(Memory.project_id == project_id)
         if memory_type:
             q = q.filter(Memory.memory_type == memory_type)
         rows = q.order_by(Memory.id.desc()).all()
-        return [(r[0], r[1], r[2]) for r in rows]
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
     finally:
         db.close()
 
@@ -259,21 +290,30 @@ def get_relevant_episodic_memory(project_id: str, prompt: str, limit: int = 3):
     not a fix, since the model still paid the token cost and still had
     to do the filtering itself, imperfectly.
 
-    This is a genuine but honestly-scoped heuristic: plain keyword
-    overlap between the current prompt and each stored episode's key +
-    value (via _tokenize()'s stopword-filtered word sets), not real
-    semantic similarity — a prompt that means the same thing in
-    different words won't match. That's a real, known limitation, not
-    hidden here or in the prompt framing that consumes this (see
-    ollama_service.py). Rows with zero shared meaningful words are
-    dropped entirely — analogous to episodic recall simply failing to
-    surface anything when there's no matching cue, rather than
-    defaulting to "show it anyway, might be relevant." Matches are
-    ranked by overlap count and capped at `limit`."""
+    Upgraded 2026-08-10 (STATUS.md item 21) from plain keyword overlap
+    to embedding-based cosine similarity (services/embedding_service.py,
+    nomic-embed-text) — the keyword-overlap version's own docstring
+    already flagged its real limit: a prompt meaning the same thing in
+    different words wouldn't match. Checked live against how current
+    agent-memory systems (Letta/MemGPT, Mem0, Zep) actually do this
+    before building: all of them retrieve via dense embedding
+    similarity, not keyword matching, so this brings Aether in line
+    with that rather than reinventing something novel.
+
+    Rows below EPISODIC_SIMILARITY_THRESHOLD are dropped entirely —
+    same "cue fails to surface anything, rather than showing it anyway"
+    principle as before, just measured continuously (cosine similarity)
+    instead of binary (any shared word or not). Graceful fallback: if
+    the embedding model is unavailable (Ollama down, not pulled) or a
+    stored row predates the embedding upgrade and has no vector, this
+    degrades to the original keyword-overlap heuristic for that
+    request/row rather than silently returning nothing — a worse-
+    quality match beats a request that can't recall anything at all
+    because of an unrelated infrastructure hiccup."""
     db = SessionLocal()
     try:
         rows = (
-            db.query(Memory.key, Memory.value)
+            db.query(Memory.key, Memory.value, Memory.embedding)
             .filter(Memory.project_id == project_id, Memory.memory_type == "episodic")
             .order_by(Memory.id.desc())
             .all()
@@ -284,15 +324,26 @@ def get_relevant_episodic_memory(project_id: str, prompt: str, limit: int = 3):
     if not rows:
         return []
 
-    prompt_words = _tokenize(prompt)
-    if not prompt_words:
-        return []
+    prompt_vec = get_embedding(prompt, task="search_query")
+    prompt_words = _tokenize(prompt) if prompt_vec is None else None
 
     scored = []
-    for key, value in rows:
-        overlap = len(prompt_words & _tokenize(f"{key} {value}"))
-        if overlap > 0:
-            scored.append((overlap, key, value))
+    for key, value, embedding_json in rows:
+        row_vec = json.loads(embedding_json) if embedding_json else None
+        if prompt_vec is not None and row_vec is not None:
+            score = cosine_similarity(prompt_vec, row_vec)
+            if score >= EPISODIC_SIMILARITY_THRESHOLD:
+                scored.append((score, key, value))
+        else:
+            # Fallback path: either the embedding model is down for this
+            # request, or this specific row predates the upgrade and has
+            # no stored vector. Keyword overlap, scaled down so it never
+            # outranks a real embedding match if both paths somehow mix
+            # in the same result set.
+            words = prompt_words if prompt_words is not None else _tokenize(prompt)
+            overlap = len(words & _tokenize(f"{key} {value}"))
+            if overlap > 0:
+                scored.append((overlap / 100.0, key, value))
 
     scored.sort(key=lambda t: t[0], reverse=True)
     return [(key, value) for _, key, value in scored[:limit]]

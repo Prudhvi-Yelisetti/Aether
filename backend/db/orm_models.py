@@ -53,6 +53,9 @@ class Memory(Base):
     value = Column(String)
     timestamp = Column(DateTime, server_default=func.now(), onupdate=func.now())
     memory_type = Column(String, nullable=False, default="semantic")
+    # Both added in b47e91a3c6d4 — see that migration's docstring.
+    embedding = Column(String, nullable=True)  # JSON-encoded float list, episodic rows only
+    provenance = Column(String, nullable=True)  # set when a semantic row came from consolidation, not direct extraction
 
 
 class Experience(Base):

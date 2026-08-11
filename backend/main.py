@@ -226,7 +226,7 @@ def get_project_memory_api(project_id: str):
     if not project_exists(project_id):
         return {"error": "Project not found"}
 
-    return {"memory": [{"key": k, "value": v, "memory_type": t} for k, v, t in get_memory(project_id)]}
+    return {"memory": [{"key": k, "value": v, "memory_type": t, "provenance": p} for k, v, t, p in get_memory(project_id)]}
 
 
 # -------- Chat Route --------
