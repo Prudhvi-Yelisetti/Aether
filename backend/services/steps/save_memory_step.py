@@ -14,7 +14,7 @@ class SaveMemoryStep(Step):
     description = "Inserts context[source_key] as a new episodic memory row under memory_key, scoped to context['project_id']."
     script = ScriptMeta(
         step_id="step.save_memory",
-        version="1.2.0",
+        version="1.3.0",
         owner="prudhvi",
         history=(
             "1.0.0: initial implementation, hardcoded source_key='summarize', "
@@ -27,6 +27,11 @@ class SaveMemoryStep(Step):
             "fix). Behavior change: save_memory() no longer overwrites the "
             "prior value for this key, it keeps a short bounded history "
             "(EPISODIC_KEEP most recent) instead.",
+            "1.3.0: reads context['consolidate_memory'] (opt-in, defaults "
+            "False -- see planning_service.py's _build_skill_input() for "
+            "where it enters the context) and forwards it to save_memory(), "
+            "which uses it to decide whether to run memory consolidation "
+            "right before this key's oldest row would be pruned.",
         ),
     )
 
@@ -37,6 +42,7 @@ class SaveMemoryStep(Step):
     def run(self, context: dict) -> StepResult:
         project_id = context.get("project_id")
         value = context.get(self.source_key)
+        consolidate_memory = context.get("consolidate_memory", False)
 
         if not project_id:
             return StepResult(success=False, error="context['project_id'] is required")
@@ -44,7 +50,7 @@ class SaveMemoryStep(Step):
             return StepResult(success=False, error=f"context['{self.source_key}'] is required")
 
         try:
-            save_memory(project_id, self.memory_key, value, memory_type="episodic")
+            save_memory(project_id, self.memory_key, value, memory_type="episodic", consolidate=consolidate_memory)
             return StepResult(success=True, output={"key": self.memory_key, "value": value})
         except Exception as e:
             return StepResult(success=False, error=str(e))

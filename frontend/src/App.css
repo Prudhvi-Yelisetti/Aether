@@ -658,6 +658,23 @@
   color: var(--text);
 }
 
+/* Provenance badge for consolidated semantic facts (Aether wrote it
+   itself by summarizing repeated episodic results, not a direct user
+   statement) — reuses --warning, same token the attachment-truncation
+   notices use, for the same reason: a lower-trust-than-default signal,
+   not an error. */
+.memory-provenance-badge {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  width: fit-content;
+}
+
 .capability-item {
   display: flex;
   flex-direction: column;

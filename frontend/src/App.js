@@ -139,6 +139,11 @@ function App() {
         chatId: currentChat,
         llmValidate,
         model: settings.model,
+        // No per-message toggle like llmValidate has — consolidation
+        // is a background memory-maintenance behavior, not something
+        // that makes sense to flip per message. Reads straight from
+        // the Settings panel's persisted value.
+        consolidateMemory: settings.consolidateMemory,
         // Strip the data:image/...;base64, prefix — the backend (and
         // Ollama's API underneath it) wants raw base64 only. The full
         // data URL stays in the message above, since that's what the

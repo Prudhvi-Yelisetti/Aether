@@ -38,7 +38,7 @@ export async function fetchModels() {
   return res.json();
 }
 
-export async function sendChatMessage({ prompt, mode, projectId, chatId, llmValidate, model, images, files }) {
+export async function sendChatMessage({ prompt, mode, projectId, chatId, llmValidate, model, consolidateMemory, images, files }) {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -54,6 +54,9 @@ export async function sendChatMessage({ prompt, mode, projectId, chatId, llmVali
       // (stripped client-side, see ChatWindow.js) — see main.py's
       // ChatRequest for why an attached image overrides model anyway.
       model: model || null,
+      // Added 2026-08-12 — see main.py's ChatRequest.consolidate_memory
+      // and settings.js. Off unless explicitly enabled in Settings.
+      consolidate_memory: !!consolidateMemory,
       images: images && images.length ? images : null,
       // files: [{name, content, encoding}] — encoding "text" for
       // plain-text documents extracted client-side, "base64" for

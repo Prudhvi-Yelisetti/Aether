@@ -76,6 +76,20 @@ export default function SettingsPanel({ onClose, onSettingsChange }) {
           Default "validate" to on for new messages
         </label>
 
+        <label className="toggle-validate settings-toggle">
+          <input
+            type="checkbox"
+            checked={settings.consolidateMemory}
+            onChange={(e) => setSettings((s) => ({ ...s, consolidateMemory: e.target.checked }))}
+          />
+          Consolidate memory
+        </label>
+        <p className="field-hint">
+          When a skill result is about to be dropped from memory, Aether summarizes
+          it into a durable fact first (with a strict check against the source before
+          it's saved). Off by default — see the Memory panel for anything it writes.
+        </p>
+
         <div className="panel-actions">
           <button className="btn-secondary" onClick={onClose}>
             Cancel

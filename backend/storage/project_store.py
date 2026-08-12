@@ -10,14 +10,14 @@ Function names and return shapes are kept identical to the previous version
 so main.py does not need to change.
 """
 
-import logging
 import json
 import re
 from db.database import SessionLocal
 from db.orm_models import Project, Chat, Memory
 from services.embedding_service import get_embedding, cosine_similarity
+from services.logging_config import get_logger
 
-logger = logging.getLogger("aether.storage")
+logger = get_logger("aether.storage")
 
 # Real bug fixed structurally in a91c3d5e7f02 (see that migration's
 # docstring for the full brain-memory-systems rationale). Two kinds of
@@ -196,7 +196,7 @@ def project_exists(project_id: str) -> bool:
         db.close()
 
 
-def save_memory(project_id: str, key: str, value: str, memory_type: str = "semantic", provenance: str = None):
+def save_memory(project_id: str, key: str, value: str, memory_type: str = "semantic", provenance: str = None, consolidate: bool = False):
     """memory_type='semantic' (default): upserts on (project_id, key) —
     one current value per fact, same external behavior as before.
     provenance (semantic only): set when this write came from
@@ -207,7 +207,19 @@ def save_memory(project_id: str, key: str, value: str, memory_type: str = "seman
     it (services/embedding_service.py — used by
     get_relevant_episodic_memory() below), then prunes back to
     EPISODIC_KEEP most recent rows for that (project_id, key). See the
-    module-level comment above for the full rationale."""
+    module-level comment above for the full rationale.
+    consolidate (episodic only, opt-in, default False — see
+    consolidation_service.py's module docstring for the full design):
+    when a new episodic write would push this key past EPISODIC_KEEP,
+    generate a citation-grounded summary from ALL current rows for this
+    key (the ones about to be kept AND the ones about to be pruned —
+    grounded in the recent pattern, not just what's being discarded),
+    verify it strictly, and if it passes, write it to semantic memory
+    with provenance before pruning proceeds. Pruning happens either
+    way, whether consolidation runs, succeeds, or fails — bounded
+    episodic capacity is unconditional; consolidation is a side effect
+    on top of it, never a reason to keep more episodic rows than the
+    cap allows."""
     db = SessionLocal()
     try:
         if memory_type == "episodic":
@@ -216,15 +228,18 @@ def save_memory(project_id: str, key: str, value: str, memory_type: str = "seman
             db.add(Memory(project_id=project_id, key=key, value=value, memory_type="episodic", embedding=embedding_json))
             db.commit()
 
-            keep_ids = [
-                r[0] for r in (
-                    db.query(Memory.id)
-                    .filter(Memory.project_id == project_id, Memory.key == key, Memory.memory_type == "episodic")
-                    .order_by(Memory.id.desc())
-                    .limit(EPISODIC_KEEP)
-                    .all()
-                )
-            ]
+            all_rows = (
+                db.query(Memory.id, Memory.value)
+                .filter(Memory.project_id == project_id, Memory.key == key, Memory.memory_type == "episodic")
+                .order_by(Memory.id.desc())
+                .all()
+            )
+            keep_ids = [r[0] for r in all_rows[:EPISODIC_KEEP]]
+            about_to_prune = len(all_rows) > EPISODIC_KEEP
+
+            if consolidate and about_to_prune:
+                _try_consolidate(project_id, key, [(r[0], r[1]) for r in all_rows])
+
             if keep_ids:
                 (
                     db.query(Memory)
@@ -252,12 +267,47 @@ def save_memory(project_id: str, key: str, value: str, memory_type: str = "seman
     except Exception:
         db.rollback()
         logger.error(
-            "save_memory failed for project_id=%r key=%r memory_type=%r",
-            project_id, key, memory_type, exc_info=True,
+            "save_memory_failed",
+            project_id=project_id, key=key, memory_type=memory_type, exc_info=True,
         )
         raise
     finally:
         db.close()
+
+
+def _try_consolidate(project_id: str, key: str, rows: list[tuple[int, str]]):
+    """Called from save_memory()'s episodic path right before a key's
+    oldest row(s) would be pruned past EPISODIC_KEEP. Best-effort: any
+    failure here (LLM down, verification rejects it, parsing fails)
+    just means no consolidated fact gets written — pruning still
+    proceeds regardless in the caller, so this never blocks or corrupts
+    the episodic write itself. See consolidation_service.py's module
+    docstring for the full design and why this fails closed rather
+    than open."""
+    from services.consolidation_service import generate_consolidated_summary, verify_consolidation
+    import datetime
+
+    result = generate_consolidated_summary(key, rows)
+    if result is None:
+        return
+
+    summary, cited_ids = result
+    rows_by_id = dict(rows)
+    cited_rows = [(cid, rows_by_id[cid]) for cid in cited_ids if cid in rows_by_id]
+    if not cited_rows:
+        logger.warning("consolidation_no_valid_cited_rows", project_id=project_id, key=key)
+        return
+
+    if not verify_consolidation(summary, cited_rows):
+        logger.warning("consolidation_rejected_by_verifier", project_id=project_id, key=key, summary=summary[:200])
+        return
+
+    provenance = (
+        f"Consolidated from '{key}' (source memory IDs: {', '.join(str(c) for c in cited_ids)}) "
+        f"on {datetime.date.today().isoformat()}"
+    )
+    save_memory(project_id, f"consolidated_{key}", summary, memory_type="semantic", provenance=provenance)
+    logger.info("consolidation_written", project_id=project_id, key=key, cited_ids=cited_ids)
 
 
 def get_memory(project_id: str, memory_type: str = None):

@@ -130,6 +130,17 @@ class ChatRequest(BaseModel):
     # file content either) but does NOT force a model override the way
     # images force VISION_MODEL — any model can read text.
     files: Optional[List[FileAttachment]] = None
+    # Added 2026-08-11: opt-in memory consolidation, off by default —
+    # same reasoning as llm_validate above: an LLM-driven mechanism that
+    # writes to durable semantic memory needs a trust-building period
+    # before running unsupervised on every request. See
+    # services/consolidation_service.py and storage/project_store.py's
+    # save_memory() for what this actually does (summarize+verify+
+    # promote an episodic memory to semantic right before it would
+    # otherwise be silently pruned). Only meaningful for the two
+    # memory-writing Skills (research_topic, file_digest) — see
+    # planning_service.py's _build_skill_input().
+    consolidate_memory: bool = False
 
 
 
@@ -164,7 +175,15 @@ def list_models():
     /capabilities above. "vision" in a model's capabilities is what
     ChatRequest.images actually checks against at request time — this
     endpoint just surfaces that so the frontend can show it, e.g. to
-    grey out or label non-vision models when an image is attached."""
+    grey out or label non-vision models when an image is attached.
+
+    Filters out anything without "completion" — added 2026-08-12 after
+    pulling nomic-embed-text for episodic-memory retrieval
+    (services/embedding_service.py, STATUS.md item 21) surfaced it in
+    this same list with capabilities=['embedding'] only. Selecting it
+    as a chat-model override would have sent every message to a model
+    that can't generate a completion at all — not a hypothetical, this
+    was caught live via Playwright while testing the Settings panel."""
     try:
         resp = requests.get("http://localhost:11434/api/tags", timeout=5)
         resp.raise_for_status()
@@ -176,6 +195,7 @@ def list_models():
                     "capabilities": m.get("capabilities", []),
                 }
                 for m in models
+                if "completion" in m.get("capabilities", [])
             ]
         }
     except requests.exceptions.RequestException:
@@ -366,7 +386,7 @@ def chat(request: ChatRequest):
     if request.images or request.files:
         the_plan = Plan(capability_type="reasoning", capability_name=None, source="rule")
     else:
-        the_plan = plan(prompt, project_id)
+        the_plan = plan(prompt, project_id, request.consolidate_memory)
 
     # -------- Generate Response, with Validation + bounded Retry/Escalate --------
     # Phase E2 (validation_service.py) + E3 (decision_service.py): decide()

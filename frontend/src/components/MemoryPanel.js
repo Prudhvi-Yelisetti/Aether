@@ -7,11 +7,17 @@ import { fetchProjectMemory } from "../api";
 // from one flat list into the two kinds of memory the backend now
 // actually distinguishes:
 //   - semantic: durable facts about the user, always included in
-//     every reasoning-path prompt.
+//     every reasoning-path prompt. May carry a `provenance` string if
+//     Aether wrote it itself via memory consolidation (see
+//     services/consolidation_service.py) rather than a direct
+//     statement — shown as a badge below, not hidden, since a
+//     consolidated fact deserves a visibly different trust level than
+//     one the user stated directly.
 //   - episodic: specific past skill-run results, only injected into a
-//     prompt when they match it by keyword overlap (see
-//     get_relevant_episodic_memory()) — up to 3 kept per key, oldest
-//     pruned automatically.
+//     prompt when they're similar to it by embedding cosine similarity
+//     (get_relevant_episodic_memory(), upgraded from keyword overlap
+//     in STATUS.md item 21) — up to 3 kept per key, oldest pruned
+//     automatically.
 // The old single-list version (2026-07-31, STATUS.md item 13) existed
 // so a person could see the same thing the model sees; this keeps
 // that goal but reflects what's actually true now instead of a single
@@ -63,6 +69,11 @@ export default function MemoryPanel({ projectId, onClose }) {
                 <div className="capability-item" key={row.key}>
                   <span className="capability-item-name">{row.key}</span>
                   <span className="capability-item-desc memory-value">{row.value}</span>
+                  {row.provenance && (
+                    <span className="memory-provenance-badge" title={row.provenance}>
+                      🤖 consolidated by Aether
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -74,7 +85,7 @@ export default function MemoryPanel({ projectId, onClose }) {
             <h3 className="memory-section-heading">Recent skill results</h3>
             <p className="capability-section-note">
               Up to 3 kept per type, oldest dropped automatically. Only pulled
-              into a prompt when it matches what you're asking about — most
+              into a prompt when it's relevant to what you're asking — most
               won't show up in most conversations.
             </p>
             <div className="capability-section">

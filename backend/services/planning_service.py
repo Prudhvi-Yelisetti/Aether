@@ -87,14 +87,22 @@ def _parse_decision(raw: str) -> tuple[str, str | None]:
     return "reasoning", None
 
 
-def _build_skill_input(capability_name: str, prompt: str, project_id: str | None) -> dict | None:
+def _build_skill_input(capability_name: str, prompt: str, project_id: str | None, consolidate_memory: bool = False) -> dict | None:
     """Returns None if the input can't be built (missing project_id for a
     memory-writing Skill, no filename found, code generation failed) —
-    plan() treats None as "fall back to reasoning" rather than crashing."""
+    plan() treats None as "fall back to reasoning" rather than crashing.
+
+    consolidate_memory (added alongside the memory-consolidation feature
+    — see storage/project_store.py's save_memory() and
+    services/consolidation_service.py): opt-in, default off, only
+    meaningful for the two memory-writing skills below (research_topic,
+    file_digest) — threaded into their input dict so SaveMemoryStep's
+    context has it. find_and_digest_file and research_and_save_file
+    don't write to memory at all, so it's irrelevant to them."""
     if capability_name == "research_topic":
         if not project_id:
             return None
-        return {"query": extract_search_query(prompt), "project_id": project_id}
+        return {"query": extract_search_query(prompt), "project_id": project_id, "consolidate_memory": consolidate_memory}
 
     if capability_name == "research_and_save_file":
         # No project_id needed — this Skill saves to a file in the
@@ -123,7 +131,7 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
         filename = extract_filename(prompt)
         if not filename:
             return None
-        return {"filename": filename, "project_id": project_id}
+        return {"filename": filename, "project_id": project_id, "consolidate_memory": consolidate_memory}
 
     if capability_name == "find_and_digest_file":
         # No project_id needed — unlike file_digest, this Skill doesn't
@@ -151,7 +159,7 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
     return None
 
 
-def plan(prompt: str, project_id: str | None = None) -> Plan:
+def plan(prompt: str, project_id: str | None = None, consolidate_memory: bool = False) -> Plan:
     # Cheap deterministic path: pure math never needs the Planner or an
     # LLM call at all.
     if is_simple_math(prompt):
@@ -186,7 +194,7 @@ def plan(prompt: str, project_id: str | None = None) -> Plan:
         logger.info("plan_decided", capability_type=capability_type, capability_name=capability_name, source="llm")
         return Plan(capability_type=capability_type, capability_name=capability_name, source="llm")
 
-    built_input = _build_skill_input(capability_name, prompt, project_id)
+    built_input = _build_skill_input(capability_name, prompt, project_id, consolidate_memory)
     if built_input is None:
         logger.warning(
             "plan_skill_input_unbuildable",

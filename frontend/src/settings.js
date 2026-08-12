@@ -14,6 +14,13 @@ const DEFAULTS = {
   // toggle itself is still per-message from there — this only sets
   // where it starts.
   defaultValidate: false,
+  // Added 2026-08-12 for memory consolidation (services/
+  // consolidation_service.py). Off by default — same trust-building-
+  // period reasoning as defaultValidate above, but for a stricter
+  // reason: a bad consolidation writes a wrong fact into durable
+  // semantic memory, not just a missed validation check on one
+  // response. See main.py's ChatRequest.consolidate_memory.
+  consolidateMemory: false,
 };
 
 export function loadSettings() {
