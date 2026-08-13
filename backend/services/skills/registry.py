@@ -11,7 +11,6 @@ importable.
 
 from services.skills.base import Skill
 from services.skills.research_topic_skill import ResearchTopicSkill
-from services.skills.file_digest_skill import FileDigestSkill
 from services.skills.calculate_and_explain_skill import CalculateAndExplainSkill
 from services.skills.research_and_save_file_skill import ResearchAndSaveFileSkill
 from services.skills.find_and_digest_file_skill import FindAndDigestFileSkill
@@ -43,7 +42,11 @@ class SkillRegistry:
 
 registry = SkillRegistry()
 registry.register(ResearchTopicSkill())
-registry.register(FileDigestSkill())
 registry.register(CalculateAndExplainSkill())
 registry.register(ResearchAndSaveFileSkill())
 registry.register(FindAndDigestFileSkill())
+# FileDigestSkill retired 2026-08-13 (STATUS.md item 23) — folded into
+# FindAndDigestFileSkill, which the planner already preferred for
+# typical phrasing. See that Skill's module docstring for the full
+# reasoning and services/router.py (item 1) for the precedent of
+# verify-then-delete rather than leaving dead code registered.

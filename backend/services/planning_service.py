@@ -96,9 +96,10 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
     — see storage/project_store.py's save_memory() and
     services/consolidation_service.py): opt-in, default off, only
     meaningful for the two memory-writing skills below (research_topic,
-    file_digest) — threaded into their input dict so SaveMemoryStep's
-    context has it. find_and_digest_file and research_and_save_file
-    don't write to memory at all, so it's irrelevant to them."""
+    find_and_digest_file) — threaded into their input dict so
+    SaveMemoryStep's context has it. research_and_save_file doesn't
+    write to project memory at all (it writes to a workspace file
+    instead), so it's irrelevant there."""
     if capability_name == "research_topic":
         if not project_id:
             return None
@@ -115,35 +116,35 @@ def _build_skill_input(capability_name: str, prompt: str, project_id: str | None
         # STATUS.md): this always called slugify_filename(query),
         # ignoring any filename the user actually typed — "research the
         # Eiffel Tower and save a summary to eiffel_summary.txt" silently
-        # saved as eiffel_tower.txt instead. file_digest and
-        # find_and_digest_file below both already call
-        # extract_filename(prompt) first for exactly this reason; this
-        # branch just never did. Same fix here: prefer an explicit
-        # filename in the prompt, fall back to the slugified query only
-        # when the user didn't name one.
+        # saved as eiffel_tower.txt instead. find_and_digest_file below
+        # already calls extract_filename(prompt) first for exactly this
+        # reason; this branch just never did. Same fix here: prefer an
+        # explicit filename in the prompt, fall back to the slugified
+        # query only when the user didn't name one.
         query = extract_search_query(prompt)
         filename = extract_filename(prompt) or slugify_filename(query)
         return {"query": query, "filename": filename}
 
-    if capability_name == "file_digest":
+    if capability_name == "find_and_digest_file":
+        # project_id required as of 2026-08-13 (STATUS.md item 23) —
+        # this Skill now writes episodic memory itself (SaveMemoryStep
+        # added to FindAndDigestFileSkill), closing the overlap where
+        # the planner reliably preferred this Skill over the retired
+        # file_digest for typical phrasing, but only file_digest ever
+        # wrote to memory. Same memory_key ("last_file_digest") as
+        # file_digest used, so existing episodic rows/consolidated
+        # facts under that key keep working unchanged regardless of
+        # which Skill produced them.
+        #
+        # Deliberately more tolerant filename handling than a strict
+        # exact-match would be: falls back to the raw prompt as the
+        # fuzzy-match candidate when extract_filename() finds no dotted
+        # word, instead of returning None and giving up before
+        # FindFileStep even gets a chance to try.
         if not project_id:
             return None
-        filename = extract_filename(prompt)
-        if not filename:
-            return None
-        return {"filename": filename, "project_id": project_id, "consolidate_memory": consolidate_memory}
-
-    if capability_name == "find_and_digest_file":
-        # No project_id needed — unlike file_digest, this Skill doesn't
-        # save to memory (see FindAndDigestFileSkill's docstring for why
-        # it exists: file_digest fails outright on any filename mismatch,
-        # this one fuzzy-matches). Deliberately more tolerant than
-        # file_digest's own input-building here too: falls back to the
-        # raw prompt as the fuzzy-match candidate when extract_filename()
-        # finds no dotted word, instead of returning None and giving up
-        # before FindFileStep even gets a chance to try.
         candidate = extract_filename(prompt) or prompt
-        return {"candidate_filename": candidate}
+        return {"candidate_filename": candidate, "project_id": project_id, "consolidate_memory": consolidate_memory}
 
     if capability_name == "calculate_and_explain":
         try:
