@@ -8,10 +8,16 @@ class RunCodeStep(Step):
     name = "run_code"
     description = "Executes Python code (sandboxed) using the code Tool."
     script = ScriptMeta(
-        step_id="step.run_code",
+        identifier="step.run_code",
         version="1.0.0",
         owner="prudhvi",
         history=("1.0.0: initial implementation, built for CalculateAndExplainSkill",),
+        # code:execute is real, but bounded: CodeTool -> plugins/code_runner.py
+        # runs inside a bwrap sandbox with --unshare-all (no network, can't
+        # see/signal host processes) and a read-only host filesystem —
+        # documented here as the actual boundary, not "code:execute" implying
+        # unrestricted host access.
+        permissions=("code:execute",),
     )
 
     def run(self, context: dict) -> StepResult:

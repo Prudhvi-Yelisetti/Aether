@@ -13,6 +13,7 @@ from services.skills.base import Skill
 from services.steps.web_search_step import WebSearchStep
 from services.steps.summarize_step import SummarizeStep
 from services.steps.write_file_step import WriteFileStep
+from services.object_meta import ObjectMeta
 
 
 class ResearchAndSaveFileSkill(Skill):
@@ -23,3 +24,19 @@ class ResearchAndSaveFileSkill(Skill):
         SummarizeStep(source_key="web_search"),
         WriteFileStep(source_key="summarize"),
     ]
+    meta = ObjectMeta(
+        identifier="skill.research_and_save_file",
+        version="1.1.0",
+        owner="prudhvi",
+        history=(
+            "1.0.0: initial implementation",
+            "1.1.0: planning_service.py's _build_skill_input() for this "
+            "Skill always called slugify_filename(query), ignoring any "
+            "filename the user actually typed -- \"...save a summary to "
+            "eiffel_summary.txt\" silently saved as eiffel_tower.txt "
+            "instead (found live via llm_validate eval traffic, "
+            "STATUS.md). Fixed upstream in planning_service.py, listed "
+            "here since it changed this Skill's real save-location "
+            "behavior even though this file itself didn't change.",
+        ),
+    )

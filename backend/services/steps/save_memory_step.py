@@ -13,7 +13,7 @@ class SaveMemoryStep(Step):
     name = "save_memory"
     description = "Inserts context[source_key] as a new episodic memory row under memory_key, scoped to context['project_id']."
     script = ScriptMeta(
-        step_id="step.save_memory",
+        identifier="step.save_memory",
         version="1.3.0",
         owner="prudhvi",
         history=(
@@ -33,6 +33,14 @@ class SaveMemoryStep(Step):
             "which uses it to decide whether to run memory consolidation "
             "right before this key's oldest row would be pruned.",
         ),
+        # Writes to the project's SQLite memory table (local, not a
+        # filesystem in the FileTool/ListFilesTool sense — its own
+        # category since it's structured DB access, not raw file I/O).
+        # When consolidate_memory is on, this can also trigger
+        # reasoning:generate calls indirectly via consolidation_service.py
+        # -- not listed here since that's opt-in behavior this Step
+        # forwards to save_memory(), not something it does itself.
+        permissions=("memory:write",),
     )
 
     def __init__(self, source_key: str = "summarize", memory_key: str = "last_research"):

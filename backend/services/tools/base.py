@@ -24,6 +24,8 @@ from typing import Type
 
 from pydantic import BaseModel
 
+from services.object_meta import ObjectMeta
+
 
 class ToolResult(BaseModel):
     success: bool
@@ -35,6 +37,11 @@ class Tool(ABC):
     name: str
     description: str
     InputModel: Type[BaseModel]
+    # AI Object Model metadata (STATUS.md item 24) — every concrete Tool
+    # sets this, same pattern Step already used via `script: ScriptMeta`.
+    # No default here: a Tool without real, code-derived meta is a gap to
+    # notice at review time, not paper over with a placeholder.
+    meta: ObjectMeta
 
     @abstractmethod
     def execute(self, input: BaseModel) -> ToolResult:
@@ -48,4 +55,10 @@ class Tool(ABC):
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema(),
+            "meta": {
+                "identifier": self.meta.identifier,
+                "version": self.meta.version,
+                "trust_level": self.meta.trust_level,
+                "permissions": list(self.meta.permissions),
+            },
         }

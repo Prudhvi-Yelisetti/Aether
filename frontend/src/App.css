@@ -702,6 +702,17 @@
   color: var(--text-faint);
 }
 
+/* AI Object Model metadata line (identifier/version/trust_level/
+   permissions — STATUS.md item 24), added under each capability-item
+   alongside capability-item-steps. Slightly dimmer than steps since
+   it's secondary provenance info, not the primary description. */
+.capability-item-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
 /* Memory values can be long (a saved research/digest summary) — wrap
    rather than overflow the panel, unlike capability-item-desc's normal
    short one-line descriptions. */

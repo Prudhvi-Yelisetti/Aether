@@ -37,6 +37,7 @@ from services.steps.find_file_step import FindFileStep
 from services.steps.read_file_step import ReadFileStep
 from services.steps.summarize_step import SummarizeStep
 from services.steps.save_memory_step import SaveMemoryStep
+from services.object_meta import ObjectMeta
 
 
 class FindAndDigestFileSkill(Skill):
@@ -49,3 +50,26 @@ class FindAndDigestFileSkill(Skill):
         SummarizeStep(source_key="read_file"),
         SaveMemoryStep(source_key="summarize", memory_key="last_file_digest"),
     ]
+    meta = ObjectMeta(
+        identifier="skill.find_and_digest_file",
+        version="1.1.0",
+        owner="prudhvi",
+        history=(
+            "1.0.0: initial implementation -- composes ListFilesStep, "
+            "FindFileStep (new), ReadFileStep and SummarizeStep (both "
+            "reused from FileDigestSkill) for fuzzy filename matching, "
+            "surviving typos/missing extensions/partial names that made "
+            "FileDigestSkill's exact-match extract_filename() fail with "
+            "\"File not found\" -- the most common permanent Tool/Skill "
+            "failure at the time, see STATUS.md.",
+            "1.1.0: added SaveMemoryStep (item 23) -- the planner "
+            "reliably preferred this Skill over FileDigestSkill for "
+            "typical phrasing, but only FileDigestSkill wrote to memory, "
+            "so episodic memory for file digests was effectively never "
+            "written through normal use. FileDigestSkill retired "
+            "outright rather than kept alongside a now-fully-redundant "
+            "purpose; same memory_key=\"last_file_digest\" it used, so "
+            "existing episodic rows and any consolidated_last_file_digest "
+            "semantic fact (item 22) keep working unchanged.",
+        ),
+    )

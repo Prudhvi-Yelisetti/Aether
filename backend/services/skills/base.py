@@ -25,6 +25,7 @@ import time
 from dataclasses import dataclass
 
 from services.steps.base import Step
+from services.object_meta import ObjectMeta
 from services.logging_config import get_logger
 from storage.step_metrics_store import log_step_metric
 
@@ -43,6 +44,13 @@ class Skill:
     name: str
     description: str
     steps: list[Step] = []
+    # AI Object Model metadata (STATUS.md item 24) — every concrete Skill
+    # sets this. permissions is deliberately left at ObjectMeta's default
+    # empty tuple here: a Skill's real blast radius is the union of its
+    # Steps' own permissions, computed dynamically in
+    # SkillRegistry.describe_all() rather than hand-duplicated per Skill
+    # — see that method's comment for why.
+    meta: ObjectMeta
 
     def run(self, initial_context: dict, request_id: str | None = None) -> SkillResult:
         context = dict(initial_context)

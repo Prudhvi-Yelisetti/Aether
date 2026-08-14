@@ -77,7 +77,7 @@ class FindFileStep(Step):
     name = "filename"
     description = "Fuzzy-matches a candidate filename (or a natural-language request mentioning one) against the real files in the workspace."
     script = ScriptMeta(
-        step_id="step.find_file",
+        identifier="step.find_file",
         version="1.1.0",
         owner="prudhvi",
         history=(
@@ -87,6 +87,9 @@ class FindFileStep(Step):
             "(e.g. \"summarize my jazz file for me\") despite every other "
             "part of the chain working correctly; see STATUS.md.",
         ),
+        # No I/O of its own -- pure string matching against a filename
+        # list already gathered by ListFilesStep. permissions=() is
+        # accurate, not an oversight.
     )
 
     def __init__(self, candidate_key: str = "candidate_filename", listing_key: str = "list_files"):

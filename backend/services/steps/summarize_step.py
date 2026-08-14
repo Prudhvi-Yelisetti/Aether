@@ -27,7 +27,7 @@ class SummarizeStep(Step):
     name = "summarize"
     description = "Summarizes the content at context[source_key] into plain language."
     script = ScriptMeta(
-        step_id="step.summarize",
+        identifier="step.summarize",
         version="1.2.0",
         owner="prudhvi",
         history=(
@@ -41,6 +41,11 @@ class SummarizeStep(Step):
             "(found live via llm_validate eval traffic, STATUS.md item 13). "
             "No-op for any caller that doesn't set context['question'].",
         ),
+        # Calls the Reasoning Service (Ollama, local) — no filesystem or
+        # network access of its own beyond that. "reasoning:generate" is
+        # its own category, not "network:outbound", since it never talks
+        # to anything outside this machine (Ollama runs locally).
+        permissions=("reasoning:generate",),
     )
 
     def __init__(self, source_key: str = "web_search"):

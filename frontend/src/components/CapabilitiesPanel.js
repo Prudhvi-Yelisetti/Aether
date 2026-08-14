@@ -37,6 +37,12 @@ export default function CapabilitiesPanel({ onClose }) {
                 <div className="capability-item" key={t.name}>
                   <span className="capability-item-name">tool:{t.name}</span>
                   <span className="capability-item-desc">{t.description}</span>
+                  {t.meta && (
+                    <span className="capability-item-meta">
+                      v{t.meta.version} · {t.meta.trust_level}
+                      {t.meta.permissions.length > 0 && ` · ${t.meta.permissions.join(", ")}`}
+                    </span>
+                  )}
                 </div>
               ))}
             </section>
@@ -53,6 +59,12 @@ export default function CapabilitiesPanel({ onClose }) {
                   <span className="capability-item-steps">
                     {s.steps.join(" → ")}
                   </span>
+                  {s.meta && (
+                    <span className="capability-item-meta">
+                      v{s.meta.version} · {s.meta.trust_level}
+                      {s.meta.permissions.length > 0 && ` · ${s.meta.permissions.join(", ")}`}
+                    </span>
+                  )}
                 </div>
               ))}
             </section>

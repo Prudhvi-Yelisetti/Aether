@@ -14,10 +14,13 @@ class ListFilesStep(Step):
     name = "list_files"
     description = "Lists every file in the workspace."
     script = ScriptMeta(
-        step_id="step.list_files",
+        identifier="step.list_files",
         version="1.0.0",
         owner="prudhvi",
         history=("1.0.0: initial implementation, built for FindAndDigestFileSkill",),
+        # Lighter than read_file's "filesystem:read" -- this only sees
+        # filenames (plugins/file_lister.py), never file contents.
+        permissions=("filesystem:list",),
     )
 
     def run(self, context: dict) -> StepResult:

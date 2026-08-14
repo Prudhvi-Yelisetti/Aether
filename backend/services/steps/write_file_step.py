@@ -12,10 +12,14 @@ class WriteFileStep(Step):
     name = "write_file"
     description = "Writes context[source_key] to a file named context['filename'] in the workspace."
     script = ScriptMeta(
-        step_id="step.write_file",
+        identifier="step.write_file",
         version="1.0.0",
         owner="prudhvi",
         history=("1.0.0: initial implementation, built for ResearchAndSaveFileSkill",),
+        # WriteFileTool -> plugins/file_writer.py is scoped to WORKSPACE_DIR
+        # the same way FileTool's reads are (see plugins/file_reader.py) —
+        # "filesystem:write" here means workspace-local, not host-wide.
+        permissions=("filesystem:write",),
     )
 
     def __init__(self, source_key: str = "summarize"):

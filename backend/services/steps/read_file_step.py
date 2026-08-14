@@ -8,10 +8,15 @@ class ReadFileStep(Step):
     name = "read_file"
     description = "Reads a file from the workspace using the file Tool."
     script = ScriptMeta(
-        step_id="step.read_file",
+        identifier="step.read_file",
         version="1.0.0",
         owner="prudhvi",
         history=("1.0.0: initial implementation, built for FileDigestSkill",),
+        # Derived from FileTool -> plugins/file_reader.py's real behavior,
+        # not aspirational: reads are scoped to WORKSPACE_DIR only (see
+        # that module's resolve_safe_path()), so "filesystem:read" is
+        # accurate as this Step's actual blast radius, not "filesystem:*".
+        permissions=("filesystem:read",),
     )
 
     def run(self, context: dict) -> StepResult:

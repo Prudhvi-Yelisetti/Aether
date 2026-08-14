@@ -35,6 +35,23 @@ class SkillRegistry:
                 "name": s.name,
                 "description": s.description,
                 "steps": [step.name for step in s.steps],
+                "meta": {
+                    "identifier": s.meta.identifier,
+                    "version": s.meta.version,
+                    "trust_level": s.meta.trust_level,
+                    # A Skill's own meta.permissions is deliberately left
+                    # empty (see each Skill's meta= for why) -- a Skill
+                    # doesn't act independently, it only does what its
+                    # Steps do, so the real blast radius is computed here
+                    # as the union of every Step's script.permissions
+                    # rather than hand-duplicated onto the Skill too,
+                    # which would drift the moment a Step gets added or
+                    # changed without someone remembering to update this
+                    # separately.
+                    "permissions": sorted({
+                        p for step in s.steps for p in getattr(step.script, "permissions", ())
+                    }),
+                },
             }
             for s in self._skills.values()
         ]

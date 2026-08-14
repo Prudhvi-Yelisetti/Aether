@@ -9,10 +9,20 @@ class WebSearchStep(Step):
     name = "web_search"
     description = "Searches the web for context['query'] using the web Tool."
     script = ScriptMeta(
-        step_id="step.web_search",
+        identifier="step.web_search",
         version="1.0.0",
         owner="prudhvi",
-        history=("1.0.0: initial implementation, Phase D",),
+        history=(
+            "1.0.0: initial implementation, Phase D",
+            "Note (no version bump -- plugins/web_search.py changed, this "
+            "Step didn't): DuckDuckGo Instant Answer API's narrow exact-"
+            "topic keying caused real live failures; fixed with tighter "
+            "query extraction upstream and a Wikipedia OpenSearch fallback "
+            "with a real second bug (missing User-Agent header, silently "
+            "swallowed by a bare except) caught and fixed same day — see "
+            "STATUS.md item 8.",
+        ),
+        permissions=("network:outbound",),
     )
 
     def run(self, context: dict) -> StepResult:

@@ -10,6 +10,7 @@ code -> run it (Tool, deterministic) -> explain the result (reasoning).
 from services.skills.base import Skill
 from services.steps.run_code_step import RunCodeStep
 from services.steps.summarize_step import SummarizeStep
+from services.object_meta import ObjectMeta
 
 
 class CalculateAndExplainSkill(Skill):
@@ -19,3 +20,19 @@ class CalculateAndExplainSkill(Skill):
         RunCodeStep(),
         SummarizeStep(source_key="run_code"),
     ]
+    meta = ObjectMeta(
+        identifier="skill.calculate_and_explain",
+        version="1.1.0",
+        owner="prudhvi",
+        history=(
+            "1.0.0: initial implementation",
+            "1.1.0: SummarizeStep bumped to 1.2.0 underneath this Skill "
+            "unchanged -- context['question'] now grounds the explain "
+            "prompt with the original request, fixing bare numeric "
+            "output getting explained with no idea what it means "
+            "(found live via llm_validate eval traffic, STATUS.md item "
+            "13). Listed here since it changed this Skill's real "
+            "behavior even though calculate_and_explain_skill.py itself "
+            "didn't change.",
+        ),
+    )
