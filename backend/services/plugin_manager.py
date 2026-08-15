@@ -198,4 +198,18 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
         result = tool.execute(tool.InputModel())
         return result.output
 
+    # -------- APPEND_FILE TOOL --------
+    # Added 2026-08-14 (STATUS.md item 25). Same extraction helpers as
+    # write_file above — deciding filename/content is identical whether
+    # the result overwrites or appends, only the Tool underneath differs.
+    elif plugin_name == "append_file":
+        filename = extract_filename(prompt) or slugify_filename(prompt)
+        try:
+            content = extract_write_content(prompt)
+        except ReasoningError as e:
+            return f"Could not determine what to append: {e}"
+
+        result = tool.execute(tool.InputModel(filename=filename, content=content))
+        return result.output
+
     return None

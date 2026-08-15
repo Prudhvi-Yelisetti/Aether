@@ -9,6 +9,7 @@ clean search query exactly the same way the bare "web" Tool path does.
 """
 
 from services.reasoning_service import generate_strict, ReasoningError
+import re
 from services.routing import FAST_MODEL, STRONG_MODEL
 
 MAX_SLUG_LENGTH = 60
@@ -30,10 +31,22 @@ def slugify_filename(text: str, extension: str = "txt") -> str:
 
 
 def extract_filename(prompt: str) -> str | None:
-    """Deterministic — no LLM call. A word containing '.' is assumed to be
-    a filename. This is a parsing heuristic, not reasoning, so it doesn't
-    need generate()/generate_strict() at all."""
-    return next((p for p in prompt.split() if "." in p), None)
+    """Deterministic — no LLM call. Matches a token that looks like an
+    actual filename: word characters, a literal dot, then an extension
+    starting with a letter — not just "any word containing a dot,"
+    which was a real bug found live 2026-08-14 while testing
+    AppendFileTool (STATUS.md item 25): "Write 'Day 1: started the
+    project.' to a file called journal.txt" matched "project.'" (the
+    end of the quoted sentence, not a filename) and stopped there,
+    never reaching the actual "journal.txt" later in the prompt.
+    Requiring the character right after the dot to be a letter rules
+    out both that false-positive shape (a dot followed by a closing
+    quote) and another one it would otherwise also produce (a decimal
+    number like "version 2.5", dot followed by another digit), while
+    still matching every real extension this app writes/reads
+    (.txt, .py, .md, .csv, .json, .log, ...)."""
+    match = re.search(r"[\w][\w\-]*\.[a-zA-Z][\w]{0,4}\b", prompt)
+    return match.group(0) if match else None
 
 
 def extract_search_query(prompt: str) -> str:
