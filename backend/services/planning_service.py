@@ -222,8 +222,28 @@ def _coerce_skill_output(output):
     # -- is the right place to bridge that: it is the one spot that
     # already knows both "this is a Skill's final output" and "this
     # has to become a string for the chat response."
+    #
+    # Real gap found live 2026-08-16 while auditing every Skill's
+    # context-flow bridge: this originally returned ONLY the
+    # confirmation ("Saved to memory under 'last_research'.") and
+    # discarded output["value"] -- the actual research/digest content
+    # -- entirely. Anyone asking Aether to "research X" or "digest
+    # file Y" got a terse save confirmation as their whole chat
+    # response and had to separately open the Memory panel to see
+    # what was actually found. Confirmed live: a real
+    # "research the history of jazz music" request correctly ran the
+    # full web_search -> summarize -> save_memory pipeline and
+    # produced a real summary internally, but the /chat response was
+    # just "Saved to memory under 'last_research'." -- the summary
+    # itself never reached the conversation. Fixed by leading with
+    # the actual content and noting the save as a trailing detail,
+    # matching how a person would naturally report back after doing
+    # research: the finding first, "I saved this" second.
     if isinstance(output, dict):
         key = output.get("key", "memory")
+        value = output.get("value")
+        if value:
+            return f"{value}\n\n(Saved to memory under '{key}'.)"
         return "Saved to memory under '" + str(key) + "'."
     if output is None:
         return "Done."
