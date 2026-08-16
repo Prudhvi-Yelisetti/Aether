@@ -208,7 +208,7 @@ def plan(prompt: str, project_id: str | None = None, consolidate_memory: bool = 
     return Plan(capability_type="skill", capability_name=capability_name, input=built_input, source="llm")
 
 
-def _coerce_skill_output(output):
+def _coerce_skill_output(output, content=None):
     # Crash found live 2026-07-31 via llm_validate eval traffic (see
     # STATUS.md): SaveMemoryStep's StepResult.output is a dict
     # (key/value pair) -- structured data for internal use, not
@@ -224,27 +224,45 @@ def _coerce_skill_output(output):
     # has to become a string for the chat response."
     #
     # Real gap found live 2026-08-16 while auditing every Skill's
-    # context-flow bridge: this originally returned ONLY the
-    # confirmation ("Saved to memory under 'last_research'.") and
-    # discarded output["value"] -- the actual research/digest content
-    # -- entirely. Anyone asking Aether to "research X" or "digest
-    # file Y" got a terse save confirmation as their whole chat
-    # response and had to separately open the Memory panel to see
-    # what was actually found. Confirmed live: a real
-    # "research the history of jazz music" request correctly ran the
-    # full web_search -> summarize -> save_memory pipeline and
-    # produced a real summary internally, but the /chat response was
-    # just "Saved to memory under 'last_research'." -- the summary
-    # itself never reached the conversation. Fixed by leading with
-    # the actual content and noting the save as a trailing detail,
-    # matching how a person would naturally report back after doing
-    # research: the finding first, "I saved this" second.
+    # context-flow bridge, in two stages:
+    #
+    # Stage 1 -- SaveMemoryStep's dict case: this originally returned
+    # ONLY the confirmation ("Saved to memory under 'last_research'.")
+    # and discarded output["value"] -- the actual research/digest
+    # content -- entirely. Confirmed live: a real "research the history
+    # of jazz music" request correctly ran the full web_search ->
+    # summarize -> save_memory pipeline and produced a real summary
+    # internally, but the /chat response was just the terse save
+    # confirmation -- the summary itself never reached the conversation.
+    #
+    # Stage 2 -- the same defect class, one level up: WriteFileStep has
+    # the identical problem for a different reason. Its Tool
+    # (WriteFileTool) returns its OWN operational confirmation string
+    # ("Saved to X (Y bytes)."), not a dict -- so it never hit stage 1's
+    # fix at all, and research_and_save_file (WebSearchStep ->
+    # SummarizeStep -> WriteFileStep) had the exact same silent-content
+    # bug confirmed live the same way: "research the history of the
+    # samba and save a summary to samba_history.txt" produced only
+    # "Saved to samba_history.txt (887 bytes)." as the response.
+    #
+    # Root cause common to both: execute_plan() below only ever reads
+    # the LAST step's own output, but for every Skill that ends in a
+    # side-effecting "sink" step (save/write, as opposed to summarize
+    # itself), the actual substance lives in an EARLIER step
+    # (context['summarize']), not the sink's own confirmation. `content`
+    # is that earlier value, passed in by execute_plan() when the last
+    # step isn't summarize itself -- this function now leads with it
+    # whenever present, regardless of which sink produced the trailing
+    # confirmation, instead of special-casing SaveMemoryStep's dict
+    # shape as stage 1 did.
     if isinstance(output, dict):
         key = output.get("key", "memory")
-        value = output.get("value")
+        value = content or output.get("value")
         if value:
             return f"{value}\n\n(Saved to memory under '{key}'.)"
         return "Saved to memory under '" + str(key) + "'."
+    if content:
+        return f"{content}\n\n({output})" if output not in (None, content) else str(content)
     if output is None:
         return "Done."
     return str(output)
@@ -267,7 +285,13 @@ def execute_plan(p: Plan, prompt: str, request_id: str | None = None) -> str | N
         if result.success:
             last_step_name = skill.steps[-1].name
             output = result.context.get(last_step_name, "Done.")
-            return _coerce_skill_output(output)
+            # See _coerce_skill_output's "Stage 2" comment: if the
+            # terminal step is a side-effecting sink rather than
+            # `summarize` itself, and an earlier summarize step
+            # produced real content, that's the substance to show --
+            # not the sink's own confirmation string.
+            content = result.context.get("summarize") if last_step_name != "summarize" else None
+            return _coerce_skill_output(output, content)
 
         return f"Couldn't complete this: {result.error}"
 
