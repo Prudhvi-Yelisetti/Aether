@@ -102,8 +102,16 @@ class FindFileStep(Step):
 
         if not candidate:
             return StepResult(success=False, error=f"context['{self.candidate_key}'] is required")
-        if not listing:
+        # None means ListFilesStep never ran (a real wiring bug); "" means
+        # it ran correctly and the workspace genuinely has no files (see
+        # plugins/file_lister.py's list_files() docstring for why these
+        # two cases now return distinguishably, not both as one generic
+        # "required" error) — worth two different messages, one pointing
+        # at a bug, the other just reporting a fact.
+        if listing is None:
             return StepResult(success=False, error=f"context['{self.listing_key}'] is required")
+        if not listing.strip():
+            return StepResult(success=False, error="The workspace has no files yet, so nothing can match.")
 
         available = [line.strip() for line in listing.splitlines() if line.strip()]
         match = _best_match(candidate, available)

@@ -78,40 +78,6 @@ def decide_plugin(prompt: str):
     return None
 
 
-# -------- AI DECISION LAYER --------
-def ai_decide_plugin(prompt: str):
-    decision_prompt = f"""
-You are an AI decision system.
-
-Decide whether this user request needs a tool.
-
-Available tools:
-- code → calculations, code execution
-- file → reading files
-- web → internet search
-
-Rules:
-- Return ONLY one word:
-    code
-    file
-    web
-    none
-
-Request: {prompt}
-"""
-
-    decision = generate(decision_prompt, model=FAST_MODEL).strip().lower()
-
-    if "code" in decision:
-        return "code"
-    if "file" in decision:
-        return "file"
-    if "web" in decision:
-        return "web"
-
-    return None
-
-
 # -------- MAIN EXECUTION FUNCTION --------
 # Dispatches through the ToolRegistry (see services/tools/registry.py). The
 # natural-language -> structured-input translation for each tool uses the
@@ -196,7 +162,12 @@ def execute_plugin(plugin_name: str, prompt: str) -> str:
     # -------- LIST_FILES TOOL --------
     elif plugin_name == "list_files":
         result = tool.execute(tool.InputModel())
-        return result.output
+        # Human-facing framing for an empty workspace belongs here, not
+        # in list_files() itself — see that function's docstring
+        # (plugins/file_lister.py) for why baking it into the returned
+        # data broke FindFileStep, which treats this same output as raw
+        # filename data, not display text.
+        return result.output or "The workspace is empty — no files yet."
 
     # -------- APPEND_FILE TOOL --------
     # Added 2026-08-14 (STATUS.md item 25). Same extraction helpers as
