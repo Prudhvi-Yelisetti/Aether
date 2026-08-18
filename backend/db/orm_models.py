@@ -29,6 +29,10 @@ class Chat(Base):
     attempts = Column(Integer, nullable=True)
     escalated = Column(Boolean, nullable=True)
     llm_validation = Column(String, nullable=True)  # "valid" | "flagged" | None (didn't run)
+    # Added in e5f8a2c91b3d — JSON-encoded list of strings, see that
+    # migration's docstring. Persists item 18's attachment_notices
+    # (previously only live in the triggering /chat response, not saved).
+    attachment_notices = Column(String, nullable=True)
 
 
 class Memory(Base):

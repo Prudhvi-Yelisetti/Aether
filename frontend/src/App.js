@@ -80,6 +80,10 @@ function App() {
         attempts: msg.attempts || 1,
         escalated: !!msg.escalated,
         llmValidation: msg.llm_validation || null,
+        // Persisted as of STATUS.md item 27 (backend: e5f8a2c91b3d) —
+        // was live-only since item 18, so reopening a past chat never
+        // showed this even though the truncation genuinely happened.
+        attachmentNotices: msg.attachment_notices || [],
       });
     });
     setMessages(formatted);

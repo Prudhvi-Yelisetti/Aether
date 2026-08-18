@@ -177,6 +177,14 @@ def add_chat(project_id: str, chat_id: int, chat: dict):
             attempts=chat.get("attempts"),
             escalated=chat.get("escalated"),
             llm_validation=chat.get("llm_validation"),
+            # Added e5f8a2c91b3d (STATUS.md item 27) — JSON-encoded so
+            # this stays a single-column addition, same choice as
+            # embedding/provenance on Memory (b47e91a3c6d4). None when
+            # the caller has no notices, not an empty-list placeholder —
+            # matches every other optional field here.
+            attachment_notices=(
+                json.dumps(chat["attachment_notices"]) if chat.get("attachment_notices") else None
+            ),
         )
         db.add(row)
         db.commit()
@@ -414,6 +422,7 @@ def get_project_full_data(project_id: str):
                 Chat.attempts,
                 Chat.escalated,
                 Chat.llm_validation,
+                Chat.attachment_notices,
             )
             .filter(Chat.project_id == project_id)
             .order_by(Chat.id.asc())
@@ -423,7 +432,7 @@ def get_project_full_data(project_id: str):
         chats = {}
         for (chat_id, prompt, response, model, capability_type,
              capability_name, capability_source, attempts, escalated,
-             llm_validation) in rows:
+             llm_validation, attachment_notices) in rows:
             chats.setdefault(chat_id, []).append({
                 "prompt": prompt,
                 "response": response,
@@ -434,6 +443,10 @@ def get_project_full_data(project_id: str):
                 "attempts": attempts,
                 "escalated": escalated,
                 "llm_validation": llm_validation,
+                # e5f8a2c91b3d — see add_chat()'s comment. Rows written
+                # before this migration have NULL here, decoded to []
+                # the same way capability_type's NULL means "no trace."
+                "attachment_notices": json.loads(attachment_notices) if attachment_notices else [],
             })
 
         return chats

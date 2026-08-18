@@ -462,6 +462,13 @@ def chat(request: ChatRequest):
             "attempts": decision.attempts,
             "escalated": decision.escalated,
             "llm_validation": llm_validation_verdict,
+            # Persisted as of e5f8a2c91b3d (STATUS.md item 27) — see
+            # add_chat()'s comment in storage/project_store.py. Was
+            # exposed in the live response since item 18 but never
+            # saved, so reopening a past chat never showed it even
+            # though the truncation genuinely happened to that stored
+            # response.
+            "attachment_notices": attachment_notices,
         }
         add_chat(project_id, chat_id, chat_data)
 
